@@ -3,6 +3,7 @@
  */
 const { KnownAnalyzerNames } = require("@azure/search-documents");
 const { AzureOpenAI } = require("openai");
+const config = require("../config");
 
 /**
  * A wrapper for setTimeout that resolves a promise after timeInMs milliseconds.
@@ -26,9 +27,11 @@ async function upsertDocuments(client, documents) {
 }
 
 /**
- * Creates the index with the given name
+ * Creates the index with the given name.
+ * @param {number} vectorDimensions Dimensions of the embedding model in use
+ * (e.g. 1536 for text-embedding-ada-002, 3072 for text-embedding-3-large).
  */
-async function createIndexIfNotExists(client, name) {
+async function createIndexIfNotExists(client, name, vectorDimensions) {
     const MyDocumentIndex = {
         name,
         fields: [
@@ -56,7 +59,7 @@ async function createIndexIfNotExists(client, name) {
                 type: "Collection(Edm.Single)",
                 name: "descriptionVector",
                 searchable: true,
-                vectorSearchDimensions: 1536,
+                vectorSearchDimensions: vectorDimensions,
                 vectorSearchProfileName: "my-vector-config"
             },
         ],
@@ -83,13 +86,13 @@ async function createIndexIfNotExists(client, name) {
  */
 async function getEmbeddingVector(text) {
     const client = new AzureOpenAI({
-        apiKey: process.env.SECRET_AZURE_OPENAI_API_KEY,
-        endpoint: process.env.AZURE_OPENAI_ENDPOINT,
-        apiVersion: "2024-02-01",
+        apiKey: config.azureOpenAIKey,
+        endpoint: config.azureOpenAIEndpoint,
+        apiVersion: config.azureOpenAIApiVersion,
     });
     const result = await client.embeddings.create({
         input: text,
-        model: process.env.AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME,
+        model: config.azureOpenAIEmbeddingDeploymentName,
     });
 
 
