@@ -78,9 +78,14 @@ async function runTurn({ text, messages, conversationId, context = {} }) {
     const response = await prompt.send(text);
     let content = response.content || AF1_MESSAGE;
 
+    // A Graph tool was selected but the user has no token: the caller sends
+    // the sign-in flow and retries this question after sign-in completes.
+    const authRequired = toolCalls.some((c) => c.error === "auth_required");
+
     // Hard AF-1 guarantee: if the model tried tools and every call was
     // rejected by validation (with no successful call), never guess.
     if (
+        !authRequired &&
         toolCalls.length > 0 &&
         !toolCalls.some((c) => c.ok) &&
         toolCalls.some((c) => c.error === "validation_failed")
@@ -96,10 +101,12 @@ async function runTurn({ text, messages, conversationId, context = {} }) {
             input: text,
             toolsCalled: toolCalls.map((c) => c.tool),
             af1: content === AF1_MESSAGE,
+            authRequired,
+            userObjectId: context.user ? context.user.aadObjectId : undefined,
         })
     );
 
-    return { content, toolCalls, toolResults };
+    return { content, toolCalls, toolResults, authRequired };
 }
 
 function logToolCall(conversationId, tool, args, result, durationMs) {

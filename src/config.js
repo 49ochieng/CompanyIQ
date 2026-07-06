@@ -26,6 +26,10 @@ const config = {
   // TEMPORARY (until SSO lands in Phase 3): row-level scope value applied to
   // every data query in place of the authenticated user's mapped identity.
   devUserScope: process.env.DEV_USER_SCOPE,
+  // Phase 3: SSO + Graph.
+  oauthConnectionName: process.env.OAUTH_CONNECTION_NAME || "graph",
+  userScopeMap: process.env.USER_SCOPE_MAP,
+  sharePointSites: process.env.SHAREPOINT_SITES,
 };
 
 module.exports = config;

@@ -1,0 +1,59 @@
+{
+    "id": "${{BOT_OBJECT_ID}}",
+    "appId": "${{BOT_ID}}",
+    "name": "CompanyIQ${{APP_NAME_SUFFIX}}",
+    "accessTokenAcceptedVersion": 2,
+    "signInAudience": "AzureADMultipleOrgs",
+    "identifierUris": ["api://botid-${{BOT_ID}}"],
+    "replyUrlsWithType": [
+        {
+            "url": "https://token.botframework.com/.auth/web/redirect",
+            "type": "Web"
+        }
+    ],
+    "oauth2Permissions": [
+        {
+            "adminConsentDescription": "Allows Teams to call the app's web APIs as the current user.",
+            "adminConsentDisplayName": "Teams can access app's web APIs",
+            "id": "8e0e3e7c-4c4a-4a0f-b1c5-9d6a2f1e5b3a",
+            "isEnabled": true,
+            "type": "User",
+            "userConsentDescription": "Enable Teams to call this app's APIs with the same rights that you have.",
+            "userConsentDisplayName": "Teams can access your user profile and make requests on your behalf",
+            "value": "access_as_user"
+        }
+    ],
+    "preAuthorizedApplications": [
+        {
+            "appId": "1fec8e78-bce4-4aaf-ab1b-5451cc387264",
+            "permissionIds": ["8e0e3e7c-4c4a-4a0f-b1c5-9d6a2f1e5b3a"]
+        },
+        {
+            "appId": "5e3ce6c0-2b1f-4285-8d4b-75ee78787346",
+            "permissionIds": ["8e0e3e7c-4c4a-4a0f-b1c5-9d6a2f1e5b3a"]
+        }
+    ],
+    "requiredResourceAccess": [
+        {
+            "resourceAppId": "00000003-0000-0000-c000-000000000000",
+            "resourceAccess": [
+                {
+                    "id": "e1fe6dd8-ba31-4d61-89e7-88639da4683d",
+                    "type": "Scope"
+                },
+                {
+                    "id": "205e70e5-aba6-4c52-a976-6d2d46c48043",
+                    "type": "Scope"
+                },
+                {
+                    "id": "df85f4d6-205c-4ac5-a5ea-6bf408dba283",
+                    "type": "Scope"
+                },
+                {
+                    "id": "570282fd-fa5c-430d-a7fd-fc8dc98a9dca",
+                    "type": "Scope"
+                }
+            ]
+        }
+    ]
+}

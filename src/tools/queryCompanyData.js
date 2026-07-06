@@ -12,13 +12,27 @@ const config = require("../config");
 const MAX_ROWS = 50;
 
 function resolveScope(context) {
-    // TEMPORARY until Phase 3 SSO: scope comes from DEV_USER_SCOPE config.
-    // Phase 3 replaces this with the authenticated user's mapped identity.
-    const scope = (context && context.userScope) || config.devUserScope;
-    if (!scope) {
-        throw new Error("No user scope configured (DEV_USER_SCOPE). Refusing to run an unscoped data query.");
+    if (context && context.userScope) {
+        // SSO path: scope mapped from the signed-in user (USER_SCOPE_MAP).
+        return { scope: context.userScope };
     }
-    return scope;
+    if (context && context.user) {
+        // Signed in but unmapped: never fall back to the dev scope.
+        return {
+            error: {
+                error: "no_data_scope",
+                message:
+                    "Your account has no data scope assigned, so company data queries are unavailable. " +
+                    "Please contact your administrator to get access.",
+            },
+        };
+    }
+    // TEMPORARY pre-SSO fallback (playground / local without sign-in):
+    // config-driven DEV_USER_SCOPE stands in for the mapped identity.
+    if (config.devUserScope) {
+        return { scope: config.devUserScope };
+    }
+    throw new Error("No user scope available (sign-in or DEV_USER_SCOPE). Refusing to run an unscoped data query.");
 }
 
 function bindParams(request, intentName, params) {
@@ -84,7 +98,11 @@ module.exports = {
      */
     async handler(args, context) {
         const startedAt = Date.now();
-        const scope = resolveScope(context);
+        const resolved = resolveScope(context);
+        if (resolved.error) {
+            return resolved.error;
+        }
+        const scope = resolved.scope;
 
         const validation = validateArgs(args.intent, args.parameters);
         if (!validation.ok) {

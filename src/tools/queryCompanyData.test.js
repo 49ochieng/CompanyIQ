@@ -77,6 +77,21 @@ test("refuses to run without any scope", async () => {
     assert.strictEqual(pool.executed.length, 0);
 });
 
+test("signed-in but unmapped user gets no_data_scope, never the dev scope", async () => {
+    let poolTouched = false;
+    db.getPool = async () => {
+        poolTouched = true;
+        throw new Error("should not connect");
+    };
+
+    const result = await tool.handler(
+        { intent: "items_by_ingredient", parameters: { ingredient: "soy" } },
+        { user: { aadObjectId: "oid-9", upn: "stranger@contoso.com" } } // signed in, no userScope
+    );
+    assert.strictEqual(result.error, "no_data_scope");
+    assert.strictEqual(poolTouched, false);
+});
+
 test("returns structured validation error without touching the database", async () => {
     let poolTouched = false;
     db.getPool = async () => {

@@ -22,7 +22,7 @@
         "indexer:delete": "env-cmd --silent -f env/.env.playground.user node ./src/indexers/delete.js",
         "db:introspect": "env-cmd --silent -f env/.env.playground.user node ./src/data/schema-introspect.js",
         "db:seed": "env-cmd --silent -f env/.env.playground.user node ./src/data/seed.js",
-        "test": "node --test src/data src/tools"
+        "test": "node --test src/auth src/data src/tools"
     },
     "repository": {
         "type": "git",

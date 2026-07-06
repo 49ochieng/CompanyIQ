@@ -30,6 +30,13 @@ provision:
       # The Microsoft Entra application's object id created for bot.
       objectId: BOT_OBJECT_ID
 
+  # Apply the Entra app manifest: expose api://botid-<BOT_ID>/access_as_user,
+  # pre-authorize the Teams clients, request delegated Graph permissions.
+  - uses: aadApp/update
+    with:
+      manifestPath: ./aad.manifest.json
+      outputFilePath: ./build/aad.manifest.${{TEAMSFX_ENV}}.json
+
   # Create or update the bot registration on dev.botframework.com
   - uses: botFramework/create
     with:
@@ -92,3 +99,6 @@ deploy:
         AZURE_SQL_USERNAME: ${{AZURE_SQL_USERNAME}}
         AZURE_SQL_PASSWORD: ${{AZURE_SQL_PASSWORD}}
         DEV_USER_SCOPE: ${{DEV_USER_SCOPE}}
+        OAUTH_CONNECTION_NAME: ${{OAUTH_CONNECTION_NAME}}
+        USER_SCOPE_MAP: ${{USER_SCOPE_MAP}}
+        SHAREPOINT_SITES: ${{SHAREPOINT_SITES}}
