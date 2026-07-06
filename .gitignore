@@ -20,3 +20,6 @@ lib/
 
 # devTools
 devTools/
+
+# database snapshot (may reveal internal schema; regenerate with npm run db:introspect)
+src/data/schema-snapshot.json

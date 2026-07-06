@@ -51,7 +51,14 @@ async function runTurn({ text, messages, conversationId, context = {} }) {
             try {
                 const result = await tool.handler(args, { conversationId, ...context });
                 toolResults[tool.name] = result;
-                toolCalls.push({ tool: tool.name, args, ok: true, durationMs: Date.now() - startedAt });
+                const rejected = !!(result && result.error);
+                toolCalls.push({
+                    tool: tool.name,
+                    args,
+                    ok: !rejected,
+                    error: rejected ? result.error : undefined,
+                    durationMs: Date.now() - startedAt,
+                });
                 logToolCall(conversationId, tool.name, args, result, Date.now() - startedAt);
                 return result;
             } catch (error) {
@@ -69,7 +76,17 @@ async function runTurn({ text, messages, conversationId, context = {} }) {
     }
 
     const response = await prompt.send(text);
-    const content = response.content || AF1_MESSAGE;
+    let content = response.content || AF1_MESSAGE;
+
+    // Hard AF-1 guarantee: if the model tried tools and every call was
+    // rejected by validation (with no successful call), never guess.
+    if (
+        toolCalls.length > 0 &&
+        !toolCalls.some((c) => c.ok) &&
+        toolCalls.some((c) => c.error === "validation_failed")
+    ) {
+        content = AF1_MESSAGE;
+    }
 
     // Audit trail seed: one JSON line per turn showing routing.
     console.log(

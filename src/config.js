@@ -16,6 +16,16 @@ const config = {
   azureSearchAdminKey: process.env.AZURE_SEARCH_ADMIN_KEY,
   azureSearchEndpoint: process.env.AZURE_SEARCH_ENDPOINT,
   azureSearchIndexName: process.env.AZURE_SEARCH_INDEX_NAME || "my-documents",
+  // SQL: AZURE_SQL_* names first, then the generic SQL_* names, then a raw
+  // connection string. See src/data/db.js.
+  sqlServer: process.env.AZURE_SQL_SERVER || process.env.SQL_SERVER,
+  sqlDatabase: process.env.AZURE_SQL_DATABASE || process.env.SQL_DATABASE,
+  sqlUser: process.env.AZURE_SQL_USERNAME || process.env.SQL_USER,
+  sqlPassword: process.env.AZURE_SQL_PASSWORD || process.env.SQL_PASSWORD,
+  sqlConnectionString: process.env.SQL_CONNECTION_STRING,
+  // TEMPORARY (until SSO lands in Phase 3): row-level scope value applied to
+  // every data query in place of the authenticated user's mapped identity.
+  devUserScope: process.env.DEV_USER_SCOPE,
 };
 
 module.exports = config;

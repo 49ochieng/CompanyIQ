@@ -1,55 +1,43 @@
-// Phase 1 STUB — returns hardcoded sample rows shaped like UC-01 Appendix A-02.
-// Phase 2 replaces the handler with the real intent whitelist → validator →
-// parameterized SQL flow. The model never writes SQL: it only selects an
-// intent and fills parameters through this function-calling schema.
+// Company data tool: the model selects a whitelisted intent and fills
+// parameters; this handler validates everything, binds typed inputs, appends
+// the row-level scope predicate, and executes the application-owned SQL.
+// The model's output NEVER becomes SQL text.
+// Accessed via the module object so tests can substitute getPool.
+const db = require("../data/db");
+const { sql } = db;
+const { INTENTS, validateArgs, buildStatement } = require("../data/intents");
+const config = require("../config");
 
-const STUB_ROWS = [
-    {
-        Item: "Protein Power Bar 6ct",
-        Brand: "Contoso Nutrition",
-        UPC: "049000001234",
-        Supplier: "Shanghai Ingredient Co.",
-        COO: "CN",
-        "Mtl<>USA": "Y",
-        "Ingredients Statement": "Soy protein isolate, cane sugar, cocoa butter, almonds, sea salt.",
-    },
-    {
-        Item: "Veggie Burger Patties 4ct",
-        Brand: "Contoso Kitchen",
-        UPC: "049000005678",
-        Supplier: "Golden Harvest Foods Ltd.",
-        COO: "CN",
-        "Mtl<>USA": "Y",
-        "Ingredients Statement": "Soy protein concentrate, brown rice, onion, garlic, spices.",
-    },
-    {
-        Item: "Energy Shake Mix Vanilla",
-        Brand: "Contoso Nutrition",
-        UPC: "049000009012",
-        Supplier: "Shanghai Ingredient Co.",
-        COO: "CN",
-        "Mtl<>USA": "Y",
-        "Ingredients Statement": "Soy protein isolate, natural vanilla flavor, xanthan gum, stevia.",
-    },
-    {
-        Item: "Classic Noodle Bowl",
-        Brand: "Contoso Kitchen",
-        UPC: "049000003456",
-        Supplier: "Golden Harvest Foods Ltd.",
-        COO: "CN",
-        "Mtl<>USA": "Y",
-        "Ingredients Statement": "Wheat flour, wheat gluten, palm oil, salt, seasoning blend.",
-    },
-    {
-        Item: "Pretzel Bites Original",
-        Brand: "Contoso Snacks",
-        UPC: "049000007890",
-        Supplier: "Midwest Bakery Supply Inc.",
-        COO: "US",
-        "Mtl<>USA": "N",
-        "Ingredients Statement": "Wheat flour, water, salt, yeast, soybean oil.",
-    },
-];
+// Cap what flows back to the model; the full result set is never needed there.
+const MAX_ROWS = 50;
+
+function resolveScope(context) {
+    // TEMPORARY until Phase 3 SSO: scope comes from DEV_USER_SCOPE config.
+    // Phase 3 replaces this with the authenticated user's mapped identity.
+    const scope = (context && context.userScope) || config.devUserScope;
+    if (!scope) {
+        throw new Error("No user scope configured (DEV_USER_SCOPE). Refusing to run an unscoped data query.");
+    }
+    return scope;
+}
+
+function bindParams(request, intentName, params) {
+    for (const [name, value] of Object.entries(params)) {
+        request.input(name, INTENTS[intentName].params[name].sqlType(), value);
+    }
+}
+
+async function execute(pool, statement, intentName, params, scope, extraInputs = {}) {
+    const request = pool.request();
+    request.input("rowLimit", sql.Int, MAX_ROWS + 1); // +1 to detect truncation
+    request.input("userScope", sql.VarChar(50), scope);
+    bindParams(request, intentName, params);
+    for (const [name, value] of Object.entries(extraInputs)) {
+        request.input(name, sql.NVarChar(100), value);
+    }
+    const result = await request.query(statement);
+    return result.recordset;
+}
 
 module.exports = {
     name: "queryCompanyData",
@@ -63,12 +51,7 @@ module.exports = {
             intent: {
                 type: "string",
                 description: "The whitelisted query intent to run.",
-                enum: [
-                    "items_by_ingredient_and_coo",
-                    "items_by_ingredient",
-                    "items_by_supplier",
-                    "item_detail",
-                ],
+                enum: Object.keys(INTENTS),
             },
             parameters: {
                 type: "object",
@@ -84,7 +67,7 @@ module.exports = {
                     },
                     supplier: {
                         type: "string",
-                        description: "Supplier name or ID.",
+                        description: "Supplier name or numeric supplier ID.",
                     },
                     upc: {
                         type: "string",
@@ -96,42 +79,80 @@ module.exports = {
         required: ["intent"],
     },
     /**
-     * STUB handler: filters the hardcoded rows so parameter routing is
-     * observable end-to-end. No database is involved in Phase 1.
      * @param {{intent: string, parameters?: Object}} args Arguments filled by the model.
-     * @param {Object} context Per-turn context (conversation ID, user scope).
+     * @param {Object} context Per-turn context ({ conversationId, userScope }).
      */
     async handler(args, context) {
-        const params = args.parameters || {};
-        let rows = STUB_ROWS;
+        const startedAt = Date.now();
+        const scope = resolveScope(context);
 
-        const ingredient = (params.ingredient || "").toLowerCase();
-        if (ingredient) {
-            rows = rows.filter((r) =>
-                r["Ingredients Statement"].toLowerCase().includes(ingredient)
-            );
+        const validation = validateArgs(args.intent, args.parameters);
+        if (!validation.ok) {
+            // Structured rejection; the orchestrator maps unrecoverable turns to AF-1.
+            return {
+                error: "validation_failed",
+                reason: validation.reason,
+                instruction:
+                    "The request could not be mapped to a valid data query. Respond with the exact fallback message.",
+            };
+        }
+        const params = validation.params;
+
+        const pool = await db.getPool();
+        let rows = await execute(pool, buildStatement(args.intent), args.intent, params, scope);
+
+        // UC-01 BF-09 semantic assist: zero rows on an ingredient intent falls
+        // back to a broadened word-by-word LIKE match, still parameterized.
+        // A vector index over ingredient statements is a future enhancement.
+        let broadened = false;
+        const broadenOn = INTENTS[args.intent].broadenOn;
+        if (rows.length === 0 && broadenOn && params[broadenOn]) {
+            const words = params[broadenOn].split(/\s+/).filter(Boolean);
+            if (words.length > 1) {
+                const extraInputs = {};
+                words.forEach((w, i) => (extraInputs[`word${i}`] = w));
+                const broadParams = { ...params };
+                delete broadParams[broadenOn];
+                rows = await execute(
+                    pool,
+                    buildStatement(args.intent, { broadened: true, wordCount: words.length }),
+                    args.intent,
+                    broadParams,
+                    scope,
+                    extraInputs
+                );
+                broadened = true;
+            }
         }
 
-        const coo = (params.country_of_origin || "").toLowerCase();
-        if (coo) {
-            const code = coo === "china" ? "cn" : coo === "united states" || coo === "usa" ? "us" : coo;
-            rows = rows.filter((r) => r.COO.toLowerCase() === code);
+        const truncated = rows.length > MAX_ROWS;
+        if (truncated) {
+            rows = rows.slice(0, MAX_ROWS);
         }
 
-        const supplier = (params.supplier || "").toLowerCase();
-        if (supplier) {
-            rows = rows.filter((r) => r.Supplier.toLowerCase().includes(supplier));
-        }
-
-        if (params.upc) {
-            rows = rows.filter((r) => r.UPC === params.upc);
-        }
+        // Audit trail: every executed intent with parameters, scope, and outcome.
+        console.log(
+            JSON.stringify({
+                event: "db_query",
+                conversationId: context && context.conversationId,
+                intent: args.intent,
+                parameters: params,
+                scope,
+                rowCount: rows.length,
+                broadened,
+                truncated,
+                durationMs: Date.now() - startedAt,
+            })
+        );
 
         return {
             intent: args.intent,
+            parameters: params,
+            scope,
             rowCount: rows.length,
             rows,
-            note: "Stub sample data (Phase 1). Real scoped SQL arrives in Phase 2.",
+            broadened,
+            ...(truncated && { note: `Results truncated to the first ${MAX_ROWS} rows.` }),
         };
     },
 };

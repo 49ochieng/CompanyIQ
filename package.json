@@ -17,10 +17,12 @@
         "dev:teamsfx:launch-playground": "env-cmd --silent -f env/.env.playground agentsplayground start",
         "dev": "nodemon --inspect=9239 --signal SIGINT ./src/index.js",
         "start": "node ./src/index.js",
-        "test": "echo \"Error: no test specified\" && exit 1",
         "watch": "nodemon --exec \"npm run start\"",
         "indexer:create": "env-cmd --silent -f env/.env.playground.user node ./src/indexers/setup.js",
-        "indexer:delete": "env-cmd --silent -f env/.env.playground.user node ./src/indexers/delete.js"
+        "indexer:delete": "env-cmd --silent -f env/.env.playground.user node ./src/indexers/delete.js",
+        "db:introspect": "env-cmd --silent -f env/.env.playground.user node ./src/data/schema-introspect.js",
+        "db:seed": "env-cmd --silent -f env/.env.playground.user node ./src/data/seed.js",
+        "test": "node --test src/data src/tools"
     },
     "repository": {
         "type": "git",
@@ -29,11 +31,12 @@
     "dependencies": {
         "@azure/identity": "^4.11.1",
         "@azure/search-documents": "^12.0.0",
+        "@microsoft/teams.ai": "^2.0.0",
         "@microsoft/teams.api": "^2.0.0",
         "@microsoft/teams.apps": "^2.0.0",
-        "@microsoft/teams.ai": "^2.0.0",
-        "@microsoft/teams.openai": "^2.0.0",
         "@microsoft/teams.common": "^2.0.0",
+        "@microsoft/teams.openai": "^2.0.0",
+        "mssql": "^12.7.0",
         "openai": "^4.104.0"
     },
     "devDependencies": {
