@@ -84,6 +84,7 @@ async function processTurn(send, conversationKey, text, userContext) {
 // Handle incoming messages
 app.on('message', async ({ send, activity, signin, isSignedIn, userToken }) => {
   const conversationKey = activity.conversation.id;
+  const turnStartedAt = Date.now();
 
   try {
     const userContext = resolveUserContext({ isSignedIn, userToken, activity });
@@ -108,6 +109,12 @@ app.on('message', async ({ send, activity, signin, isSignedIn, userToken }) => {
       }
     }
   } catch (error) {
+    console.log(JSON.stringify({
+      event: 'turn_error',
+      conversationId: conversationKey,
+      errorClass: error.code || error.name || 'Error',
+      latencyMs: Date.now() - turnStartedAt,
+    }));
     console.error('Error processing message:', error);
     await send('Sorry, I encountered an error while processing your message.');
   }

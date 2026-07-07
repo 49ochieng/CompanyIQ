@@ -40,7 +40,8 @@ provision:
           deploymentName: Create-resources-for-bot
       # Microsoft 365 Agents Toolkit will download this bicep CLI version from github for you,
       # will use bicep CLI in PATH if you remove this config.
-      bicepCliVersion: v0.9.1
+      # v0.9.1 (template default) predates the RBAC/keyvault syntax used in azure.bicep.
+      bicepCliVersion: v0.30.23
 
   # Build app package with latest env value
   - uses: teamsApp/zipAppPackage

@@ -1,6 +1,7 @@
 const { AzureKeyCredential, SearchClient } = require("@azure/search-documents");
 const { AzureOpenAI } = require("openai");
 const config = require("../config");
+const { getAzureCredential, getOpenAITokenProvider } = require("../auth/azureCredential");
 
 /**
  * Generate the embedding vector for the search query.
@@ -8,8 +9,12 @@ const config = require("../config");
  * @returns {Promise<number[]>} The embedding vector.
  */
 async function getEmbeddingVector(text) {
+    // Entra (managed identity) auth when no key is configured.
+    const auth = config.azureOpenAIKey
+        ? { apiKey: config.azureOpenAIKey }
+        : { azureADTokenProvider: getOpenAITokenProvider() };
     const client = new AzureOpenAI({
-        apiKey: config.azureOpenAIKey,
+        ...auth,
         endpoint: config.azureOpenAIEndpoint,
         apiVersion: config.azureOpenAIApiVersion,
     });
@@ -28,10 +33,14 @@ async function getEmbeddingVector(text) {
 let searchClient;
 function getSearchClient() {
     if (!searchClient) {
+        // Entra (managed identity) auth when no key is configured.
+        const credential = config.azureSearchKey
+            ? new AzureKeyCredential(config.azureSearchKey)
+            : getAzureCredential();
         searchClient = new SearchClient(
             config.azureSearchEndpoint,
             config.azureSearchIndexName,
-            new AzureKeyCredential(config.azureSearchKey),
+            credential,
             {}
         );
     }

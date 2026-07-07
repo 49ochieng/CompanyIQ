@@ -14,7 +14,19 @@ const TABLE_COLUMNS = ["Item", "Brand", "UPC", "Supplier", "COO", "Mtl<>USA", "I
  */
 function formatResponse(turnResult) {
     const { content, toolResults } = turnResult;
-    const activity = new MessageActivity(content).addAiGenerated();
+
+    // UC-01 Appendix A-02: external web content renders in a clearly
+    // separated, labeled section after internal results, with source URLs.
+    let text = content;
+    const web = toolResults.webSearch;
+    if (web && Array.isArray(web.results) && web.results.length > 0) {
+        const lines = web.results.map(
+            (r) => `- [${r.title || r.url}](${r.url})${r.snippet ? ` — ${r.snippet}` : ""}`
+        );
+        text += `\n\n---\n**External information (public web — not company data):**\n${lines.join("\n")}`;
+    }
+
+    const activity = new MessageActivity(text).addAiGenerated();
 
     const data = toolResults.queryCompanyData;
     if (data && Array.isArray(data.rows) && data.rows.length > 0) {

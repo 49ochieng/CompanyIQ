@@ -6,20 +6,29 @@ param resourceBaseName string
 @secure()
 param azureOpenAIKey string
 
-@secure()
 param azureOpenAIEndpoint string
+param azureOpenAIApiVersion string
+param azureOpenAIChatDeployment string
+param azureOpenAIEmbeddingDeployment string
 
 @secure()
-param azureOpenAIDeploymentName string
+param azureSearchQueryKey string
 
-@secure()
-param azureOpenAIEmbeddingDeploymentName string
-
-@secure()
-param azureSearchKey string
-
-@secure()
 param azureSearchEndpoint string
+param azureSearchIndexName string
+
+param azureSqlServer string
+param azureSqlDatabase string
+
+@secure()
+param azureSqlUsername string
+
+@secure()
+param azureSqlPassword string
+
+param userScopeMap string = '{}'
+param oauthConnectionName string = 'graph'
+param sharePointSites string = ''
 
 param webAppSKU string
 
@@ -29,11 +38,76 @@ param botDisplayName string
 param serverfarmsName string = resourceBaseName
 param webAppName string = resourceBaseName
 param identityName string = resourceBaseName
+param keyVaultName string = 'kv${resourceBaseName}'
 param location string = resourceGroup().location
 
 resource identity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   location: location
   name: identityName
+}
+
+// Key Vault holds the runtime secrets; the app resolves them at startup via
+// its managed identity (RBAC: Key Vault Secrets User). App settings carry
+// only non-secret configuration plus KEY_VAULT_URI.
+resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
+  name: keyVaultName
+  location: location
+  properties: {
+    tenantId: subscription().tenantId
+    sku: {
+      family: 'A'
+      name: 'standard'
+    }
+    enableRbacAuthorization: true
+  }
+}
+
+resource secretOpenAIKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(azureOpenAIKey)) {
+  parent: keyVault
+  name: 'azure-openai-api-key'
+  properties: {
+    value: azureOpenAIKey
+  }
+}
+
+resource secretSearchQueryKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(azureSearchQueryKey)) {
+  parent: keyVault
+  name: 'azure-search-query-key'
+  properties: {
+    value: azureSearchQueryKey
+  }
+}
+
+resource secretSqlUsername 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(azureSqlUsername)) {
+  parent: keyVault
+  name: 'azure-sql-username'
+  properties: {
+    value: azureSqlUsername
+  }
+}
+
+resource secretSqlPassword 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(azureSqlPassword)) {
+  parent: keyVault
+  name: 'azure-sql-password'
+  properties: {
+    value: azureSqlPassword
+  }
+}
+
+// Key Vault Secrets User
+var keyVaultSecretsUserRoleId = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  '4633458b-17de-408a-b874-0445c86b69e6'
+)
+
+resource kvSecretsUserAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(keyVault.id, identity.id, keyVaultSecretsUserRoleId)
+  scope: keyVault
+  properties: {
+    roleDefinitionId: keyVaultSecretsUserRoleId
+    principalId: identity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
 }
 
 // Compute resources for your Web App
@@ -78,32 +152,56 @@ resource webApp 'Microsoft.Web/sites@2021-02-01' = {
           value: identity.properties.tenantId
         }
         {
-          name: 'BOT_TYPE' 
+          name: 'BOT_TYPE'
           value: 'UserAssignedMsi'
         }
         {
-          name: 'AZURE_OPENAI_API_KEY'
-          value: azureOpenAIKey
+          name: 'KEY_VAULT_URI'
+          value: keyVault.properties.vaultUri
         }
         {
           name: 'AZURE_OPENAI_ENDPOINT'
           value: azureOpenAIEndpoint
         }
         {
-          name: 'AZURE_OPENAI_DEPLOYMENT_NAME'
-          value: azureOpenAIDeploymentName
+          name: 'AZURE_OPENAI_API_VERSION'
+          value: azureOpenAIApiVersion
         }
         {
-          name: 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME'
-          value: azureOpenAIEmbeddingDeploymentName
+          name: 'AZURE_OPENAI_CHAT_DEPLOYMENT'
+          value: azureOpenAIChatDeployment
         }
         {
-          name: 'AZURE_SEARCH_KEY'
-          value: azureSearchKey
+          name: 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT'
+          value: azureOpenAIEmbeddingDeployment
         }
         {
           name: 'AZURE_SEARCH_ENDPOINT'
           value: azureSearchEndpoint
+        }
+        {
+          name: 'AZURE_SEARCH_INDEX_NAME'
+          value: azureSearchIndexName
+        }
+        {
+          name: 'AZURE_SQL_SERVER'
+          value: azureSqlServer
+        }
+        {
+          name: 'AZURE_SQL_DATABASE'
+          value: azureSqlDatabase
+        }
+        {
+          name: 'USER_SCOPE_MAP'
+          value: userScopeMap
+        }
+        {
+          name: 'OAUTH_CONNECTION_NAME'
+          value: oauthConnectionName
+        }
+        {
+          name: 'SHAREPOINT_SITES'
+          value: sharePointSites
         }
       ]
       ftpsState: 'FtpsOnly'
@@ -135,3 +233,4 @@ output BOT_AZURE_APP_SERVICE_RESOURCE_ID string = webApp.id
 output BOT_DOMAIN string = webApp.properties.defaultHostName
 output BOT_ID string = identity.properties.clientId
 output BOT_TENANT_ID string = identity.properties.tenantId
+output KEY_VAULT_URI string = keyVault.properties.vaultUri

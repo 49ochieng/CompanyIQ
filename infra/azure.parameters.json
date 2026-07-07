@@ -11,17 +11,44 @@
     "azureOpenAIEndpoint": {
       "value": "${{AZURE_OPENAI_ENDPOINT}}"
     },
-    "azureOpenAIDeploymentName": {
+    "azureOpenAIApiVersion": {
+      "value": "${{AZURE_OPENAI_API_VERSION}}"
+    },
+    "azureOpenAIChatDeployment": {
       "value": "${{AZURE_OPENAI_CHAT_DEPLOYMENT}}"
     },
-    "azureOpenAIEmbeddingDeploymentName": {
+    "azureOpenAIEmbeddingDeployment": {
       "value": "${{AZURE_OPENAI_EMBEDDING_DEPLOYMENT}}"
     },
-    "azureSearchKey": {
+    "azureSearchQueryKey": {
       "value": "${{AZURE_SEARCH_QUERY_KEY}}"
     },
     "azureSearchEndpoint": {
       "value": "${{AZURE_SEARCH_ENDPOINT}}"
+    },
+    "azureSearchIndexName": {
+      "value": "${{AZURE_SEARCH_INDEX_NAME}}"
+    },
+    "azureSqlServer": {
+      "value": "${{AZURE_SQL_SERVER}}"
+    },
+    "azureSqlDatabase": {
+      "value": "${{AZURE_SQL_DATABASE}}"
+    },
+    "azureSqlUsername": {
+      "value": "${{AZURE_SQL_USERNAME}}"
+    },
+    "azureSqlPassword": {
+      "value": "${{AZURE_SQL_PASSWORD}}"
+    },
+    "userScopeMap": {
+      "value": "${{USER_SCOPE_MAP}}"
+    },
+    "oauthConnectionName": {
+      "value": "${{OAUTH_CONNECTION_NAME}}"
+    },
+    "sharePointSites": {
+      "value": "${{SHAREPOINT_SITES}}"
     },
     "webAppSKU": {
       "value": "B1"

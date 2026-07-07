@@ -6,34 +6,87 @@ CompanyIQ is a Teams-based orchestration agent that knows the company. It answer
 
 ```
 Teams message
-  → src/app/app.js (entry, auth, history)
-    → src/orchestrator/orchestrator.js (ChatPrompt with function calling)
-        → src/tools/queryCompanyData.js   (intent whitelist → validator → parameterized SQL)
-        → src/tools/searchDocuments.js    (Azure AI Search retrieval as a tool)
-        → src/tools/searchSharePoint.js   (Graph OBO — Phase 3)
-        → src/tools/searchEmail.js        (Graph OBO — Phase 3)
-        → src/tools/searchOneDrive.js     (Graph OBO — Phase 3)
-        → src/tools/webSearch.js          (Phase 4)
-    → src/formatting/responseFormatter.js (AI-assisted explanation + Adaptive Card tables)
+  → src/index.js (startup: Key Vault secret resolution, then app boot)
+  → src/app/app.js (App setup, SSO sign-in flow, conversation history)
+      src/auth/userContext.js (identity from SSO token → data scope via USER_SCOPE_MAP)
+    → src/orchestrator/orchestrator.js (ChatPrompt with function calling + audit log)
+        → src/tools/queryCompanyData.js   (intent whitelist → validator → parameterized SQL, row-level scope)
+        → src/tools/searchDocuments.js    (Azure AI Search hybrid retrieval)
+        → src/tools/searchSharePoint.js   (Graph Search API, delegated token)
+        → src/tools/searchOneDrive.js     (Graph /me/drive search, delegated token)
+        → src/tools/searchEmail.js        (Graph /me/messages $search, delegated token)
+        → src/tools/webSearch.js          (flag-gated allowlist fetch; Bing Grounding later)
+    → src/formatting/responseFormatter.js (Adaptive Card tables, citations, labeled external web section)
   → MessageActivity back to Teams
 ```
 
+Supporting modules: `src/data/db.js` (mssql pool), `src/data/intents.js` (the ONLY SQL in the app), `src/auth/graph.js` (delegated Graph fetch), `src/auth/azureCredential.js` (managed-identity auth), `src/secrets.js` (Key Vault at startup).
+
 Hard rules:
 
-- The AI never generates or executes SQL. The model only selects a whitelisted intent and fills parameters via function calling; all SQL is parameterized in application code.
-- Every SQL execution carries a row-level scope predicate derived from the authenticated user (config-driven `DEV_USER_SCOPE` until SSO lands in Phase 3).
+- The AI never generates or executes SQL. The model only selects a whitelisted intent and fills parameters via function calling; all SQL is parameterized in application code (`src/data/intents.js`).
+- Every SQL execution carries the row-level scope predicate `ri.retailer_id = @userScope`. The scope comes from the signed-in user via `USER_SCOPE_MAP`; a signed-in but unmapped user gets "no data scope assigned" (never a fallback). `DEV_USER_SCOPE` applies only when nobody is signed in (playground).
+- Graph tools use delegated tokens only (Teams SSO → OAuth connection token exchange). Results inherit the signed-in user's own permissions. Never app-only.
 - Unknown or unparseable requests get the AF-1 fallback response; the bot never guesses an intent.
-- Secrets live in `env/.env.*.user` locally and Azure app settings / Key Vault in the cloud — never in code or committed env files.
+- Secrets live in `env/.env.*.user` locally and Key Vault (resolved at startup by managed identity) in Azure — never in code or committed env files.
+- The public web tool registers only when `CONNECTOR_PUBLIC_WEB_ENABLED=true`, fetches only `ORG_WEBSITE_ALLOWLIST` domains, and its output renders in a separate section labeled as external information.
+
+## Environment variables
+
+| Variable | Purpose | Local source | Azure source |
+| - | - | - | - |
+| `AZURE_OPENAI_API_KEY` | Azure OpenAI key (omit to use managed identity) | `env/.env.*.user` | Key Vault `azure-openai-api-key` |
+| `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_API_VERSION` | Azure OpenAI resource | env file | app setting |
+| `AZURE_OPENAI_CHAT_DEPLOYMENT` / `AZURE_OPENAI_EMBEDDING_DEPLOYMENT` | deployments | env file | app setting |
+| `AZURE_SEARCH_ENDPOINT` / `AZURE_SEARCH_INDEX_NAME` | AI Search resource + index | env file | app setting |
+| `AZURE_SEARCH_QUERY_KEY` | runtime search key (omit for managed identity) | env file | Key Vault `azure-search-query-key` |
+| `AZURE_SEARCH_ADMIN_KEY` | indexer scripts only | env file | — |
+| `AZURE_SQL_SERVER` / `AZURE_SQL_DATABASE` | SQL target | env file | app setting |
+| `AZURE_SQL_USERNAME` / `AZURE_SQL_PASSWORD` | SQL auth | env file | Key Vault `azure-sql-username` / `azure-sql-password` |
+| `DEV_USER_SCOPE` | TEMPORARY scope when not signed in | env file | — (unset in Azure) |
+| `USER_SCOPE_MAP` | JSON UPN/objectId → scope | env file | app setting |
+| `OAUTH_CONNECTION_NAME` | bot OAuth connection (default `graph`) | env file | app setting |
+| `SHAREPOINT_SITES` | comma-separated site URLs constraining SharePoint search | env file | app setting |
+| `CONNECTOR_PUBLIC_WEB_ENABLED` / `ORG_WEBSITE_ALLOWLIST` | web tool gate + domains | env file | app setting |
+| `KEY_VAULT_URI` | enables startup secret resolution | — | Bicep output |
+| `CLIENT_ID` / `CLIENT_SECRET` / `TENANT_ID` / `BOT_TYPE` | bot identity | `.localConfigs` (generated) | Bicep (managed identity) |
+
+## How to add a new SQL intent
+
+1. Add an entry to `INTENTS` in [src/data/intents.js](src/data/intents.js): parameter rules (`required`, `maxLength`, `pattern`, optional `normalize`, `sqlType`) and the parameterized `where` fragment. Never interpolate values — bind everything as `@params`. The scope predicate is injected automatically by `buildStatement()`.
+2. Add the intent name to nothing else — the tool's enum reads `Object.keys(INTENTS)`.
+3. Add validator/statement tests in [src/data/intents.test.js](src/data/intents.test.js) (the scope-predicate test loops all intents automatically).
+4. If the intent needs new columns, extend `BASE_SELECT` and the formatter's `TABLE_COLUMNS`.
+
+## How to add a new tool
+
+1. Create `src/tools/<name>.js` exporting `{ name, description, parameters (JSON schema), handler(args, context) }`. The handler returns a JSON-serializable result; return `{ error: "..." }` shapes for structured refusals (`auth_required` triggers the sign-in flow; `validation_failed` maps to AF-1).
+2. Register it in [src/tools/index.js](src/tools/index.js) (gate on a config flag if it must be invisible by default).
+3. Teach the model when to use it: add a selection rule to [src/app/instructions.txt](src/app/instructions.txt).
+4. If it produces a new render shape, extend [src/formatting/responseFormatter.js](src/formatting/responseFormatter.js).
+5. Log through the existing JSON-line audit events (no user content in logs).
+
+## Local vs deployed
+
+| | Local / Playground | Azure (dev) |
+| - | - | - |
+| Start | F5 "Debug in Microsoft 365 Agents Playground" (no auth) or "Start Agent Locally" (Teams + dev tunnel) | `atk provision --env dev` + `atk deploy --env dev` |
+| Bot identity | Entra app + secret (`aadApp/create`) | user-assigned managed identity |
+| Secrets | `env/.env.*.user` → `.localConfigs` | Key Vault via managed identity |
+| SSO/Graph | works in Teams local debug only (OAuth connection on the dev.botframework.com registration) | OAuth connection on the Azure Bot resource |
+| SQL scope | `DEV_USER_SCOPE` (playground) / `USER_SCOPE_MAP` (Teams) | `USER_SCOPE_MAP` |
+| Tests | `npm test` (30 tests, DB mocked) | — |
+| Search index | `npm run indexer:create` / `db:seed` for SQL test schema | same resources |
 
 ## Phase plan
 
 | Phase | Scope | Status |
 | - | - | - |
 | 0 | Repo hygiene: declare transitive deps, fix history accumulation, folder scaffolding | done |
-| 1 | Orchestrator with function calling, tool registry, `searchDocuments` + `queryCompanyData` stub, response formatter | pending |
-| 2 | Real SQL tool: `mssql` pool, schema introspection, intent whitelist, validation, row caps, audit logging, unit tests | pending |
-| 3 | Teams SSO (Entra app, `webApplicationInfo`, OAuth connection) and Graph tools: SharePoint, OneDrive, email | pending |
-| 4 | Web search, Key Vault, managed-identity auth to Azure services, telemetry, Azure deploy | pending |
+| 1 | Orchestrator with function calling, tool registry, `searchDocuments` + `queryCompanyData` stub, response formatter | done |
+| 2 | Real SQL tool: `mssql` pool, schema introspection, intent whitelist, validation, row caps, audit logging, unit tests | done |
+| 3 | Teams SSO (Entra app, `webApplicationInfo`, OAuth connection) and Graph tools: SharePoint, OneDrive, email | done (live-tested) |
+| 4 | Web search, Key Vault, managed-identity auth to Azure services, telemetry, Azure deploy | in progress |
 
 ---
 

@@ -14,6 +14,10 @@ function buildPoolConfig() {
                 encrypt: true, // required by Azure SQL
                 trustServerCertificate: false,
             },
+            // Serverless Azure SQL can be auto-paused; resume takes tens of
+            // seconds and the first connect attempt may time out.
+            connectionTimeout: 45000,
+            requestTimeout: 45000,
             pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
         };
     }
@@ -25,18 +29,30 @@ function buildPoolConfig() {
     );
 }
 
+async function connectWithRetry() {
+    // One retry after a pause covers the serverless auto-resume window.
+    try {
+        return await new sql.ConnectionPool(buildPoolConfig()).connect();
+    } catch (err) {
+        if (err.code !== "ETIMEOUT" && err.code !== "ESOCKET") {
+            throw err;
+        }
+        console.log(JSON.stringify({ event: "db_connect_retry", reason: err.code }));
+        await new Promise((r) => setTimeout(r, 8000));
+        return await new sql.ConnectionPool(buildPoolConfig()).connect();
+    }
+}
+
 /**
  * Returns the shared connection pool, creating it on first use.
  * @returns {Promise<sql.ConnectionPool>}
  */
 function getPool() {
     if (!poolPromise) {
-        poolPromise = new sql.ConnectionPool(buildPoolConfig())
-            .connect()
-            .catch((err) => {
-                poolPromise = undefined; // allow retry on next call
-                throw err;
-            });
+        poolPromise = connectWithRetry().catch((err) => {
+            poolPromise = undefined; // allow retry on next call
+            throw err;
+        });
     }
     return poolPromise;
 }

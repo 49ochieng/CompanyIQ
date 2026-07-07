@@ -30,6 +30,9 @@ const config = {
   oauthConnectionName: process.env.OAUTH_CONNECTION_NAME || "graph",
   userScopeMap: process.env.USER_SCOPE_MAP,
   sharePointSites: process.env.SHAREPOINT_SITES,
+  // Phase 4: public web tool (never registered when the flag is off).
+  publicWebEnabled: (process.env.CONNECTOR_PUBLIC_WEB_ENABLED || "").toLowerCase() === "true",
+  orgWebsiteAllowlist: process.env.ORG_WEBSITE_ALLOWLIST,
 };
 
 module.exports = config;

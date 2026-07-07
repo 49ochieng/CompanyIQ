@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const config = require("../config");
 const { tools } = require("../tools");
+const { getOpenAITokenProvider } = require("../auth/azureCredential");
 
 // AF-1 fallback (UC-01): the exact reply for unknown or unparseable requests.
 const AF1_MESSAGE =
@@ -30,6 +31,7 @@ const instructions = fs
  * @returns {Promise<{content: string, toolCalls: Array, toolResults: Object}>}
  */
 async function runTurn({ text, messages, conversationId, context = {} }) {
+    const turnStartedAt = Date.now();
     const toolCalls = [];
     // Last result per tool name; the formatter uses these to render cards/citations.
     const toolResults = {};
@@ -39,7 +41,10 @@ async function runTurn({ text, messages, conversationId, context = {} }) {
         instructions,
         model: new OpenAIChatModel({
             model: config.azureOpenAIDeploymentName,
-            apiKey: config.azureOpenAIKey,
+            // Entra (managed identity) auth when no key is configured.
+            ...(config.azureOpenAIKey
+                ? { apiKey: config.azureOpenAIKey }
+                : { azureADTokenProvider: getOpenAITokenProvider() }),
             endpoint: config.azureOpenAIEndpoint,
             apiVersion: config.azureOpenAIApiVersion,
         }),
@@ -103,6 +108,7 @@ async function runTurn({ text, messages, conversationId, context = {} }) {
             af1: content === AF1_MESSAGE,
             authRequired,
             userObjectId: context.user ? context.user.aadObjectId : undefined,
+            latencyMs: Date.now() - turnStartedAt,
         })
     );
 
