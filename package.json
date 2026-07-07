@@ -6,7 +6,7 @@
     },
     "description": "Microsoft 365 Agents Toolkit RAG Bot Sample with Azure AI Search and Microsoft Teams SDK",
     "engines": {
-        "node": "20 || 22"
+        "node": "22"
     },
     "author": "Microsoft",
     "license": "MIT",
@@ -22,7 +22,7 @@
         "indexer:delete": "env-cmd --silent -f env/.env.playground.user node ./src/indexers/delete.js",
         "db:introspect": "env-cmd --silent -f env/.env.playground.user node ./src/data/schema-introspect.js",
         "db:seed": "env-cmd --silent -f env/.env.playground.user node ./src/data/seed.js",
-        "test": "node --test src/auth src/data src/formatting src/tools"
+        "test": "node --test \"src/**/*.test.js\""
     },
     "repository": {
         "type": "git",
@@ -37,6 +37,7 @@
         "@microsoft/teams.apps": "^2.0.0",
         "@microsoft/teams.common": "^2.0.0",
         "@microsoft/teams.openai": "^2.0.0",
+        "@modelcontextprotocol/sdk": "^1.29.0",
         "mssql": "^12.7.0",
         "openai": "^4.104.0"
     },

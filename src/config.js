@@ -33,6 +33,10 @@ const config = {
   // Phase 4: public web tool (never registered when the flag is off).
   publicWebEnabled: (process.env.CONNECTOR_PUBLIC_WEB_ENABLED || "").toLowerCase() === "true",
   orgWebsiteAllowlist: process.env.ORG_WEBSITE_ALLOWLIST,
+  // Phase 5: external agent / MCP connectors (JSON arrays; see src/connectors).
+  mcpServers: process.env.MCP_SERVERS,
+  foundryAgents: process.env.FOUNDRY_AGENTS,
+  httpAgents: process.env.HTTP_AGENTS,
 };
 
 module.exports = config;

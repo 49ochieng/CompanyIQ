@@ -50,6 +50,15 @@
     "sharePointSites": {
       "value": "${{SHAREPOINT_SITES}}"
     },
+    "mcpServers": {
+      "value": "${{MCP_SERVERS}}"
+    },
+    "foundryAgents": {
+      "value": "${{FOUNDRY_AGENTS}}"
+    },
+    "httpAgents": {
+      "value": "${{HTTP_AGENTS}}"
+    },
     "webAppSKU": {
       "value": "B1"
     },

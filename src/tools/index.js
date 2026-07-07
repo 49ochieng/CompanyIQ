@@ -9,9 +9,21 @@ const queryCompanyData = require("./queryCompanyData");
 const searchSharePoint = require("./searchSharePoint");
 const searchOneDrive = require("./searchOneDrive");
 const searchEmail = require("./searchEmail");
+const getCalendar = require("./getCalendar");
+const getPlannerTasks = require("./getPlannerTasks");
+const findPeople = require("./findPeople");
 const webSearch = require("./webSearch");
 
-const tools = [queryCompanyData, searchDocuments, searchSharePoint, searchOneDrive, searchEmail];
+const tools = [
+    queryCompanyData,
+    searchDocuments,
+    searchSharePoint,
+    searchOneDrive,
+    searchEmail,
+    getCalendar,
+    getPlannerTasks,
+    findPeople,
+];
 
 // Flag-gated: when CONNECTOR_PUBLIC_WEB_ENABLED is not "true", the tool is
 // never registered and the model never sees it.
@@ -19,10 +31,27 @@ if (config.publicWebEnabled) {
     tools.push(webSearch);
 }
 
-for (const tool of tools) {
+function validateTool(tool) {
     if (!tool.name || !tool.description || !tool.parameters || typeof tool.handler !== "function") {
         throw new Error(`Tool is missing required fields: ${tool.name || "<unnamed>"}`);
     }
 }
 
-module.exports = { tools };
+for (const tool of tools) {
+    validateTool(tool);
+}
+
+/** Register a connector-provided tool. Rejects name collisions. */
+function registerTool(tool) {
+    validateTool(tool);
+    if (tools.some((t) => t.name === tool.name)) {
+        throw new Error(`Tool name collision: '${tool.name}' is already registered`);
+    }
+    tools.push(tool);
+}
+
+function getTools() {
+    return tools;
+}
+
+module.exports = { tools, getTools, registerTool };

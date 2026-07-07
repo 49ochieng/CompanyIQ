@@ -26,6 +26,23 @@ function formatResponse(turnResult) {
         text += `\n\n---\n**External information (public web — not company data):**\n${lines.join("\n")}`;
     }
 
+    // External agent / MCP results: same pattern, labeled with the source name.
+    for (const [toolName, result] of Object.entries(toolResults)) {
+        if (toolName === "webSearch" || !result || !result.external || !result.source) {
+            continue;
+        }
+        if (!result.raw) {
+            continue;
+        }
+        text += `\n\n---\n**External result — ${result.source} (not company data):**\n${truncate(result.raw, 1500)}`;
+        if (Array.isArray(result.citations) && result.citations.length > 0) {
+            const cites = result.citations
+                .map((c) => (typeof c === "string" ? `- ${c}` : `- [${c.title || c.url}](${c.url})`))
+                .join("\n");
+            text += `\nSources:\n${cites}`;
+        }
+    }
+
     const activity = new MessageActivity(text).addAiGenerated();
 
     const data = toolResults.queryCompanyData;

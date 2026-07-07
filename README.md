@@ -15,10 +15,18 @@ Teams message
         → src/tools/searchSharePoint.js   (Graph Search API, delegated token)
         → src/tools/searchOneDrive.js     (Graph /me/drive search, delegated token)
         → src/tools/searchEmail.js        (Graph /me/messages $search, delegated token)
+        → src/tools/getCalendar.js        (Graph /me/calendarView, delegated token)
+        → src/tools/getPlannerTasks.js    (Graph /me/planner/tasks, delegated token)
+        → src/tools/findPeople.js         (Graph /me/people fuzzy lookup, delegated token)
         → src/tools/webSearch.js          (flag-gated allowlist fetch; Bing Grounding later)
-    → src/formatting/responseFormatter.js (Adaptive Card tables, citations, labeled external web section)
+        → src/connectors/*                (external: ask_agent_<name> via Foundry Responses API
+                                           or HTTP contract; mcp_<server>_<tool> via MCP
+                                           Streamable HTTP — untrusted, circuit-broken, no tokens)
+    → src/formatting/responseFormatter.js (Adaptive Card tables, citations, labeled external sections)
   → MessageActivity back to Teams
 ```
+
+Slash commands (parsed in `src/app/commands.js` before the orchestrator): `/help`, `/whoami`, `/data`, `/docs`, `/mail`, `/calendar`, `/agents`, `/web`. Unknown commands get help text, never AF-1.
 
 Supporting modules: `src/data/db.js` (mssql pool), `src/data/intents.js` (the ONLY SQL in the app), `src/auth/graph.js` (delegated Graph fetch), `src/auth/azureCredential.js` (managed-identity auth), `src/secrets.js` (Key Vault at startup).
 
@@ -48,6 +56,10 @@ Hard rules:
 | `OAUTH_CONNECTION_NAME` | bot OAuth connection (default `graph`) | env file | app setting |
 | `SHAREPOINT_SITES` | comma-separated site URLs constraining SharePoint search | env file | app setting |
 | `CONNECTOR_PUBLIC_WEB_ENABLED` / `ORG_WEBSITE_ALLOWLIST` | web tool gate + domains | env file | app setting |
+| `MCP_SERVERS` | JSON: `[{name,url,authHeader?,allowedTools?,allowedContext?}]` | env file | app setting |
+| `FOUNDRY_AGENTS` | JSON: `[{name,description,projectEndpoint,agentIdOrName,allowedContext?}]` | env file | app setting |
+| `HTTP_AGENTS` | JSON: `[{name,description,url,tokenEnv,allowedContext?}]` | env file | app setting |
+| `GRAPH_SCOPES` | delegated scope list (must match the OAuth connection) | env file | — |
 | `KEY_VAULT_URI` | enables startup secret resolution | — | Bicep output |
 | `CLIENT_ID` / `CLIENT_SECRET` / `TENANT_ID` / `BOT_TYPE` | bot identity | `.localConfigs` (generated) | Bicep (managed identity) |
 
@@ -75,7 +87,7 @@ Hard rules:
 | Secrets | `env/.env.*.user` → `.localConfigs` | Key Vault via managed identity |
 | SSO/Graph | works in Teams local debug only (OAuth connection on the dev.botframework.com registration) | OAuth connection on the Azure Bot resource |
 | SQL scope | `DEV_USER_SCOPE` (playground) / `USER_SCOPE_MAP` (Teams) | `USER_SCOPE_MAP` |
-| Tests | `npm test` (30 tests, DB mocked) | — |
+| Tests | `npm test` (54 tests, DB mocked) | — |
 | Search index | `npm run indexer:create` / `db:seed` for SQL test schema | same resources |
 
 ## Phase plan
@@ -104,7 +116,7 @@ This app template also demonstrates usage of techniques like:
 >
 > To run the template in your local dev machine, you will need:
 >
-> - [Node.js](https://nodejs.org/), supported versions: 20, 22
+> - [Node.js](https://nodejs.org/), supported version: 22 (Node 20 reached end-of-life April 2026)
 > - [Microsoft 365 Agents Toolkit Visual Studio Code Extension](https://aka.ms/teams-toolkit) version 5.0.0 and higher or [Microsoft 365 Agents Toolkit CLI](https://aka.ms/teamsfx-toolkit-cli)
 > - Prepare your own [Azure OpenAI](https://aka.ms/oai/access) resource and [Azure AI Search](https://azure.microsoft.com/en-us/products/ai-services/ai-search).
 

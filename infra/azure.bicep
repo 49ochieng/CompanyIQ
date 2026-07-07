@@ -29,6 +29,9 @@ param azureSqlPassword string
 param userScopeMap string = '{}'
 param oauthConnectionName string = 'graph'
 param sharePointSites string = ''
+param mcpServers string = '[]'
+param foundryAgents string = '[]'
+param httpAgents string = '[]'
 
 param webAppSKU string
 
@@ -137,7 +140,7 @@ resource webApp 'Microsoft.Web/sites@2021-02-01' = {
         }
         {
           name: 'WEBSITE_NODE_DEFAULT_VERSION'
-          value: '~20' // Set NodeJS version to 20.x for your site
+          value: '~22' // Node 20 reached end-of-life April 2026
         }
         {
           name: 'RUNNING_ON_AZURE'
@@ -202,6 +205,18 @@ resource webApp 'Microsoft.Web/sites@2021-02-01' = {
         {
           name: 'SHAREPOINT_SITES'
           value: sharePointSites
+        }
+        {
+          name: 'MCP_SERVERS'
+          value: mcpServers
+        }
+        {
+          name: 'FOUNDRY_AGENTS'
+          value: foundryAgents
+        }
+        {
+          name: 'HTTP_AGENTS'
+          value: httpAgents
         }
       ]
       ftpsState: 'FtpsOnly'

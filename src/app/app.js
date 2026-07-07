@@ -5,6 +5,9 @@ const config = require("../config");
 const { runTurn } = require("../orchestrator/orchestrator");
 const { formatResponse } = require("../formatting/responseFormatter");
 const { resolveUserContext } = require("../auth/userContext");
+const { parseCommand, buildCommandOutcome } = require("./commands");
+const { connectorStatus } = require("../connectors");
+const { getTools } = require("../tools");
 
 // Create storage for conversation history
 const storage = new LocalStorage();
@@ -61,13 +64,14 @@ function capHistory(messages) {
 
 // Run one question through the orchestrator and send the formatted reply.
 // Skips persistence/reply when sign-in is required (caller handles that).
-async function processTurn(send, conversationKey, text, userContext) {
+async function processTurn(send, conversationKey, text, userContext, allowedTools) {
   const messages = (storage.get(conversationKey) || []).slice();
   const turnResult = await runTurn({
     text,
     messages,
     conversationId: conversationKey,
     context: userContext,
+    allowedTools,
   });
 
   if (turnResult.authRequired) {
@@ -88,7 +92,27 @@ app.on('message', async ({ send, activity, signin, isSignedIn, userToken }) => {
 
   try {
     const userContext = resolveUserContext({ isSignedIn, userToken, activity });
-    const turnResult = await processTurn(send, conversationKey, activity.text, userContext);
+
+    // Slash commands short-circuit the orchestrator (unknown ones get help,
+    // not AF-1); command turns run with a restricted tool set.
+    const parsed = parseCommand(activity.text);
+    let commandTools;
+    if (parsed) {
+      const outcome = buildCommandOutcome(parsed, {
+        userContext,
+        isSignedIn,
+        connectorStatus,
+        toolNames: getTools().map((t) => t.name),
+      });
+      if (outcome.reply) {
+        await send(outcome.reply);
+        return;
+      }
+      activity.text = outcome.turn.text;
+      commandTools = outcome.turn.allowedTools;
+    }
+
+    const turnResult = await processTurn(send, conversationKey, activity.text, userContext, commandTools);
 
     if (turnResult.authRequired) {
       // A Graph tool was selected but the user has no token: remember the

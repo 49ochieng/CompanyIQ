@@ -3,7 +3,7 @@ const { OpenAIChatModel } = require("@microsoft/teams.openai");
 const fs = require("fs");
 const path = require("path");
 const config = require("../config");
-const { tools } = require("../tools");
+const { getTools } = require("../tools");
 const { getOpenAITokenProvider } = require("../auth/azureCredential");
 
 // AF-1 fallback (UC-01): the exact reply for unknown or unparseable requests.
@@ -28,9 +28,11 @@ const instructions = fs
  * @param {Array} turn.messages Conversation history (mutated in place).
  * @param {string} turn.conversationId Conversation ID, for audit logging.
  * @param {Object} [turn.context] Extra per-turn context passed to tool handlers.
+ * @param {string[]} [turn.allowedTools] Restrict this turn to the named tools
+ * (slash-command routing); omitted = all registered tools.
  * @returns {Promise<{content: string, toolCalls: Array, toolResults: Object}>}
  */
-async function runTurn({ text, messages, conversationId, context = {} }) {
+async function runTurn({ text, messages, conversationId, context = {}, allowedTools }) {
     const turnStartedAt = Date.now();
     const toolCalls = [];
     // Last result per tool name; the formatter uses these to render cards/citations.
@@ -50,7 +52,11 @@ async function runTurn({ text, messages, conversationId, context = {} }) {
         }),
     });
 
-    for (const tool of tools) {
+    const available = allowedTools
+        ? getTools().filter((t) => allowedTools.includes(t.name))
+        : getTools();
+
+    for (const tool of available) {
         prompt.function(tool.name, tool.description, tool.parameters, async (args) => {
             const startedAt = Date.now();
             try {

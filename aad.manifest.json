@@ -52,6 +52,22 @@
                 {
                     "id": "570282fd-fa5c-430d-a7fd-fc8dc98a9dca",
                     "type": "Scope"
+                },
+                {
+                    "id": "465a38f9-76ea-45b9-9f34-9e8b0d4b0b42",
+                    "type": "Scope"
+                },
+                {
+                    "id": "f45671fb-e0fe-4b4b-be20-3d3ce43f1bcb",
+                    "type": "Scope"
+                },
+                {
+                    "id": "ba47897c-39ec-4d83-8086-ee8256fa737d",
+                    "type": "Scope"
+                },
+                {
+                    "id": "b340eb25-3456-403f-be2f-af7a0d370277",
+                    "type": "Scope"
                 }
             ]
         }
