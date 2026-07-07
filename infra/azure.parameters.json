@@ -47,6 +47,15 @@
     "oauthConnectionName": {
       "value": "${{OAUTH_CONNECTION_NAME}}"
     },
+    "ssoAppClientId": {
+      "value": "${{SSO_APP_ID}}"
+    },
+    "ssoAppClientSecret": {
+      "value": "${{SECRET_SSO_APP_PASSWORD}}"
+    },
+    "graphScopes": {
+      "value": "${{GRAPH_SCOPES}}"
+    },
     "sharePointSites": {
       "value": "${{SHAREPOINT_SITES}}"
     },

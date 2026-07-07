@@ -1,10 +1,10 @@
 {
-    "id": "${{BOT_OBJECT_ID}}",
-    "appId": "${{BOT_ID}}",
+    "id": "${{SSO_APP_OBJECT_ID}}",
+    "appId": "${{SSO_APP_ID}}",
     "name": "CompanyIQ${{APP_NAME_SUFFIX}}",
     "accessTokenAcceptedVersion": 2,
     "signInAudience": "AzureADMultipleOrgs",
-    "identifierUris": ["api://botid-${{BOT_ID}}"],
+    "identifierUris": ["api://botid-${{SSO_APP_ID}}"],
     "replyUrlsWithType": [
         {
             "url": "https://token.botframework.com/.auth/web/redirect",

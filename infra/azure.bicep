@@ -29,6 +29,12 @@ param azureSqlPassword string
 param userScopeMap string = '{}'
 param oauthConnectionName string = 'graph'
 param sharePointSites string = ''
+param ssoAppClientId string = ''
+
+@secure()
+param ssoAppClientSecret string = ''
+
+param graphScopes string = ''
 param mcpServers string = '[]'
 param foundryAgents string = '[]'
 param httpAgents string = '[]'
@@ -240,6 +246,12 @@ module azureBotRegistration './botRegistration/azurebot.bicep' = {
     identityTenantId: identity.properties.tenantId
     botAppDomain: webApp.properties.defaultHostName
     botDisplayName: botDisplayName
+    oauthConnectionName: oauthConnectionName
+    ssoAppClientId: ssoAppClientId
+    ssoAppClientSecret: ssoAppClientSecret
+    graphScopes: empty(graphScopes)
+      ? 'User.Read Sites.Read.All Files.Read.All Mail.Read Calendars.Read Tasks.Read People.Read User.ReadBasic.All'
+      : graphScopes
   }
 }
 

@@ -17,6 +17,27 @@ provision:
     writeToEnvironmentFile:
       teamsAppId: TEAMS_APP_ID
 
+  # The deployed bot's identity is a user-assigned managed identity, which
+  # cannot expose an API. This Entra app carries the SSO surface
+  # (access_as_user) and backs the bot's OAuth connection.
+  - uses: aadApp/create
+    with:
+      name: CompanyIQ${{APP_NAME_SUFFIX}}
+      generateClientSecret: true
+      generateServicePrincipal: true
+      signInAudience: AzureADMultipleOrgs
+    writeToEnvironmentFile:
+      clientId: SSO_APP_ID
+      clientSecret: SECRET_SSO_APP_PASSWORD
+      objectId: SSO_APP_OBJECT_ID
+
+  # Expose api://botid-<SSO_APP_ID>/access_as_user, pre-authorize the Teams
+  # clients, request the delegated Graph permissions.
+  - uses: aadApp/update
+    with:
+      manifestPath: ./aad.manifest.json
+      outputFilePath: ./build/aad.manifest.${{TEAMSFX_ENV}}.json
+
   - uses: arm/deploy # Deploy given ARM templates parallelly.
     with:
       # AZURE_SUBSCRIPTION_ID is a built-in environment variable,
