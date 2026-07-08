@@ -61,7 +61,7 @@ resource botOAuthConnection 'Microsoft.BotService/botServices/connections@2022-0
     parameters: [
       {
         key: 'tenantID'
-        value: 'common' // the SSO app is multi-tenant (AzureADMultipleOrgs)
+        value: identityTenantId
       }
       {
         key: 'tokenExchangeUrl'

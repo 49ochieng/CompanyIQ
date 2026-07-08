@@ -34,15 +34,12 @@ provision:
   # env/.env.local — the Mela AI app). The bot app created above is ONLY the
   # Bot Framework channel credential; the toolkit manages no SSO surface.
 
-  # Create or update the bot registration on dev.botframework.com
-  - uses: botFramework/create
+  # The local bot was migrated from dev.botframework.com to an Azure Bot
+  # resource (SingleTenant). Update its messaging endpoint to the current
+  # dev tunnel on every provision. Requires an az login on this machine.
+  - uses: script
     with:
-      botId: ${{BOT_ID}}
-      name: CompanyIQ
-      messagingEndpoint: ${{BOT_ENDPOINT}}/api/messages
-      description: ""
-      channels:
-        - name: msteams
+      run: az resource update --subscription <AZURE_SUBSCRIPTION_ID> --resource-group <AZURE_RESOURCE_GROUP_NAME> --resource-type Microsoft.BotService/botServices --name 4a91eb47-8009-4001-9720-713ef06a9cd2 --set properties.endpoint=${{BOT_ENDPOINT}}/api/messages
 
 
   # Build app package with latest env value
@@ -82,6 +79,7 @@ deploy:
         CLIENT_ID: ${{BOT_ID}}
         CLIENT_SECRET: ${{SECRET_BOT_PASSWORD}}
         TENANT_ID: ${{TEAMS_APP_TENANT_ID}}
+        BOT_TYPE: SingleTenant
         AZURE_OPENAI_API_KEY: ${{AZURE_OPENAI_API_KEY}}
         AZURE_OPENAI_ENDPOINT: ${{AZURE_OPENAI_ENDPOINT}}
         AZURE_OPENAI_API_VERSION: ${{AZURE_OPENAI_API_VERSION}}
