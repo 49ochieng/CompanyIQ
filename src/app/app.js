@@ -61,7 +61,43 @@ console.log(JSON.stringify({
 
 // Start the sign-in flow; on failure, log the token service's full response
 // (status + body) and tell the user plainly that sign-in is misconfigured.
-async function startSignIn(send, signin, conversationKey) {
+async function startSignIn(send, signin, conversationKey, diag) {
+  // Diagnostic: fetch the same sign-in resource the OAuth card will carry and
+  // log the exact tokenExchangeResource URI the Teams client is asked to match
+  // against webApplicationInfo.resource.
+  if (diag && diag.api && diag.activity) {
+    try {
+      const state = Buffer.from(JSON.stringify({
+        connectionName: config.oauthConnectionName,
+        conversation: {
+          activityId: diag.activity.id,
+          bot: diag.activity.recipient,
+          channelId: diag.activity.channelId,
+          conversation: diag.activity.conversation,
+          serviceUrl: diag.activity.serviceUrl,
+          user: diag.activity.from,
+        },
+        msAppId: process.env.CLIENT_ID,
+      })).toString('base64');
+      const resource = await diag.api.bots.signIn.getResource({ state });
+      console.log(JSON.stringify({
+        event: 'signin_resource',
+        conversationId: conversationKey,
+        tokenExchangeUri: resource.tokenExchangeResource?.uri ?? null,
+        tokenExchangeProviderId: resource.tokenExchangeResource?.providerId ?? null,
+        signInLinkHost: resource.signInLink ? new URL(resource.signInLink).host : null,
+      }));
+    } catch (error) {
+      console.log(JSON.stringify({
+        event: 'signin_resource_failed',
+        conversationId: conversationKey,
+        status: error.response?.status ?? error.status,
+        body: error.response?.data ?? null,
+        message: error.message,
+      }));
+    }
+  }
+
   try {
     await signin({
       oauthCardText: 'CompanyIQ needs you to sign in to use SharePoint, OneDrive, email, calendar, or tasks.',
@@ -125,7 +161,7 @@ async function processTurn(send, conversationKey, text, userContext, allowedTool
 }
 
 // Handle incoming messages
-app.on('message', async ({ send, activity, signin, signout, isSignedIn, userToken }) => {
+app.on('message', async ({ send, activity, signin, signout, isSignedIn, userToken, api }) => {
   const conversationKey = activity.conversation.id;
   const turnStartedAt = Date.now();
 
@@ -137,7 +173,7 @@ app.on('message', async ({ send, activity, signin, signout, isSignedIn, userToke
       if (userContext.user) {
         await send(`You're already signed in as ${userContext.user.upn || userContext.user.name}.`);
       } else {
-        await startSignIn(send, signin, conversationKey);
+        await startSignIn(send, signin, conversationKey, { api, activity });
       }
       return;
     }
@@ -157,7 +193,7 @@ app.on('message', async ({ send, activity, signin, signout, isSignedIn, userToke
         if (userContext.user) {
           await send(`You're already signed in as ${userContext.user.upn || userContext.user.name}.`);
         } else {
-          await startSignIn(send, signin, conversationKey);
+          await startSignIn(send, signin, conversationKey, { api, activity });
         }
         return;
       }
@@ -180,7 +216,7 @@ app.on('message', async ({ send, activity, signin, signout, isSignedIn, userToke
       // A Graph tool was selected but the user has no token: remember the
       // question, start the sign-in flow, and retry on the `signin` event.
       storage.set(`pending/${conversationKey}`, activity.text);
-      await startSignIn(send, signin, conversationKey);
+      await startSignIn(send, signin, conversationKey, { api, activity });
     }
   } catch (error) {
     console.log(JSON.stringify({
