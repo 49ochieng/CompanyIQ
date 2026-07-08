@@ -1,6 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert");
-const { parseCommand, buildCommandOutcome } = require("./commands");
+const { parseCommand, buildCommandOutcome, isSignInMessage } = require("./commands");
+const { buildInstructions, AF1_MESSAGE } = require("../orchestrator/orchestrator");
 
 const DEPS = {
     userContext: {},
@@ -70,6 +71,35 @@ test("/whoami reports identity, scope, and gated tools", () => {
     const signedOut = buildCommandOutcome({ command: "whoami", args: "" }, DEPS);
     assert.match(signedOut.reply, /Not signed in/);
     assert.ok(!signedOut.reply.includes("searchEmail, findPeople"));
+});
+
+test("plain 'sign in'/'login' messages are detected as sign-in requests", () => {
+    for (const yes of ["sign in", "Sign In", "SIGNIN", "log in", "login", "  sign in!  ", "sign-in"]) {
+        assert.strictEqual(isSignInMessage(yes), true, `should match: ${yes}`);
+    }
+    for (const no of ["sign in to sharepoint please", "what is a login", "design", "", null]) {
+        assert.strictEqual(isSignInMessage(no), false, `should not match: ${no}`);
+    }
+});
+
+test("/signin and /signout return actions for the app to execute", () => {
+    assert.deepStrictEqual(buildCommandOutcome({ command: "signin", args: "" }, DEPS), { action: "signin" });
+    assert.deepStrictEqual(buildCommandOutcome({ command: "signout", args: "" }, DEPS), { action: "signout" });
+});
+
+test("turn instructions carry the signed-in identity for name questions", () => {
+    const signedIn = buildInstructions({
+        user: { name: "Edgar O.", upn: "edgar.mcochieng@armely.com" },
+        userScope: "RETAILER_100",
+    });
+    assert.match(signedIn, /Signed-in user: Edgar O\. <edgar\.mcochieng@armely\.com>/);
+    assert.match(signedIn, /RETAILER_100/);
+
+    const signedOut = buildInstructions({});
+    assert.match(signedOut, /No user is signed in/);
+    assert.match(signedOut, /type "sign in"/);
+    // AF-1 text is still present as the narrow fallback, not removed
+    assert.ok(signedOut.includes(AF1_MESSAGE));
 });
 
 test("/agents lists connector circuit status", () => {

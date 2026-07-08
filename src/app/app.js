@@ -5,7 +5,7 @@ const config = require("../config");
 const { runTurn } = require("../orchestrator/orchestrator");
 const { formatResponse } = require("../formatting/responseFormatter");
 const { resolveUserContext } = require("../auth/userContext");
-const { parseCommand, buildCommandOutcome } = require("./commands");
+const { parseCommand, buildCommandOutcome, isSignInMessage } = require("./commands");
 const { connectorStatus } = require("../connectors");
 const { getTools } = require("../tools");
 
@@ -48,6 +48,45 @@ const app = new App({
   oauth: { defaultConnectionName: config.oauthConnectionName },
 });
 
+// Startup config check: everything SSO needs, so misconfiguration is visible
+// immediately in the log instead of as a 400 at sign-in time.
+console.log(JSON.stringify({
+  event: 'startup_config',
+  oauthConnectionName: config.oauthConnectionName,
+  clientId: process.env.CLIENT_ID || '(not set — playground/skipAuth mode, sign-in disabled)',
+  clientSecretPresent: !!process.env.CLIENT_SECRET,
+  tenantIdPresent: !!process.env.TENANT_ID,
+  botType: process.env.BOT_TYPE || 'MultiTenant (default)',
+}));
+
+// Start the sign-in flow; on failure, log the token service's full response
+// (status + body) and tell the user plainly that sign-in is misconfigured.
+async function startSignIn(send, signin, conversationKey) {
+  try {
+    await signin({
+      oauthCardText: 'CompanyIQ needs you to sign in to use SharePoint, OneDrive, email, calendar, or tasks.',
+      signInButtonText: 'Sign In',
+    });
+    return true;
+  } catch (error) {
+    console.log(JSON.stringify({
+      event: 'signin_start_failed',
+      conversationId: conversationKey,
+      status: error.response?.status ?? error.status,
+      body: error.response?.data ?? error.body ?? null,
+      message: error.message,
+      connectionName: config.oauthConnectionName,
+      clientId: process.env.CLIENT_ID || null,
+    }));
+    storage.delete(`pending/${conversationKey}`);
+    await send(
+      "Sign-in isn't configured correctly yet. An administrator needs to check the bot's OAuth " +
+      `connection ('${config.oauthConnectionName}') — details are in the bot log.`
+    );
+    return false;
+  }
+}
+
 // Trim history to the cap without leaving an orphaned function-call exchange
 // at the front (the OpenAI API rejects a function result whose call is missing).
 function capHistory(messages) {
@@ -86,12 +125,22 @@ async function processTurn(send, conversationKey, text, userContext, allowedTool
 }
 
 // Handle incoming messages
-app.on('message', async ({ send, activity, signin, isSignedIn, userToken }) => {
+app.on('message', async ({ send, activity, signin, signout, isSignedIn, userToken }) => {
   const conversationKey = activity.conversation.id;
   const turnStartedAt = Date.now();
 
   try {
     const userContext = resolveUserContext({ isSignedIn, userToken, activity });
+
+    // "sign in" / "login" as plain text triggers the flow directly.
+    if (isSignInMessage(activity.text)) {
+      if (userContext.user) {
+        await send(`You're already signed in as ${userContext.user.upn || userContext.user.name}.`);
+      } else {
+        await startSignIn(send, signin, conversationKey);
+      }
+      return;
+    }
 
     // Slash commands short-circuit the orchestrator (unknown ones get help,
     // not AF-1); command turns run with a restricted tool set.
@@ -104,6 +153,19 @@ app.on('message', async ({ send, activity, signin, isSignedIn, userToken }) => {
         connectorStatus,
         toolNames: getTools().map((t) => t.name),
       });
+      if (outcome.action === 'signin') {
+        if (userContext.user) {
+          await send(`You're already signed in as ${userContext.user.upn || userContext.user.name}.`);
+        } else {
+          await startSignIn(send, signin, conversationKey);
+        }
+        return;
+      }
+      if (outcome.action === 'signout') {
+        await signout(config.oauthConnectionName);
+        await send("You're signed out. Type `sign in` to sign in again.");
+        return;
+      }
       if (outcome.reply) {
         await send(outcome.reply);
         return;
@@ -118,19 +180,7 @@ app.on('message', async ({ send, activity, signin, isSignedIn, userToken }) => {
       // A Graph tool was selected but the user has no token: remember the
       // question, start the sign-in flow, and retry on the `signin` event.
       storage.set(`pending/${conversationKey}`, activity.text);
-      try {
-        await signin({
-          oauthCardText: 'CompanyIQ needs you to sign in to search SharePoint, OneDrive, or email.',
-          signInButtonText: 'Sign In',
-        });
-      } catch (error) {
-        console.error('Sign-in flow unavailable:', error.message);
-        storage.delete(`pending/${conversationKey}`);
-        await send(
-          'That question needs SharePoint, OneDrive, or email access, which requires sign-in — ' +
-          'available only when chatting with CompanyIQ in Microsoft Teams.'
-        );
-      }
+      await startSignIn(send, signin, conversationKey);
     }
   } catch (error) {
     console.log(JSON.stringify({

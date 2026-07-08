@@ -13,9 +13,16 @@ const HELP_TEXT = [
     "- `/calendar [today|week]` — your upcoming meetings",
     "- `/agents` — configured external agents/MCP servers and their status",
     "- `/web <query>` — search the public web (when enabled)",
+    "- `/signin` — sign in (you can also just type `sign in`)",
+    "- `/signout` — sign out, so you can test the sign-in flow again",
     "",
     "Anything without a leading `/` is answered with all available tools.",
 ].join("\n");
+
+// Plain-text synonyms that should start the sign-in flow, never AF-1.
+function isSignInMessage(text) {
+    return /^\s*(sign\s*-?\s*in|log\s*-?\s*in|signin|login)\s*[.!]*\s*$/i.test(text || "");
+}
 
 /**
  * @param {string} text Incoming message text.
@@ -105,6 +112,12 @@ function buildCommandOutcome(parsed, deps) {
             return { reply: `**Configured external connectors:**\n${lines.join("\n")}` };
         }
 
+        case "signin":
+            return { action: "signin" };
+
+        case "signout":
+            return { action: "signout" };
+
         case "web":
             if (!config.publicWebEnabled) {
                 return {
@@ -121,4 +134,4 @@ function buildCommandOutcome(parsed, deps) {
     }
 }
 
-module.exports = { parseCommand, buildCommandOutcome, HELP_TEXT };
+module.exports = { parseCommand, buildCommandOutcome, isSignInMessage, HELP_TEXT };

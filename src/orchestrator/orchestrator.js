@@ -17,6 +17,28 @@ const instructions = fs
     .trim();
 
 /**
+ * Per-turn system prompt: the base instructions plus the signed-in user's
+ * identity, so "what is my name?"-style questions are answerable and never
+ * hit the fallback.
+ */
+function buildInstructions(context) {
+    if (context.user) {
+        const scope = context.userScope
+            ? `Their company data scope is ${context.userScope}.`
+            : "They have no company data scope assigned.";
+        return (
+            `${instructions}\n\nSigned-in user: ${context.user.name || "(name unknown)"} ` +
+            `<${context.user.upn || context.user.aadObjectId}>. ${scope} ` +
+            "Answer questions about their own identity directly from this line."
+        );
+    }
+    return (
+        `${instructions}\n\nNo user is signed in. If the user asks who they are or anything ` +
+        'about their own identity, tell them to type "sign in" — never use the fallback message for that.'
+    );
+}
+
+/**
  * Run one conversation turn through the LLM with function calling.
  *
  * ChatPrompt wraps `messages` in a LocalMemory that shares the array, so the
@@ -40,7 +62,7 @@ async function runTurn({ text, messages, conversationId, context = {}, allowedTo
 
     const prompt = new ChatPrompt({
         messages,
-        instructions,
+        instructions: buildInstructions(context),
         model: new OpenAIChatModel({
             model: config.azureOpenAIDeploymentName,
             // Entra (managed identity) auth when no key is configured.
@@ -136,4 +158,4 @@ function logToolCall(conversationId, tool, args, result, durationMs) {
     );
 }
 
-module.exports = { runTurn, AF1_MESSAGE };
+module.exports = { runTurn, buildInstructions, AF1_MESSAGE };
