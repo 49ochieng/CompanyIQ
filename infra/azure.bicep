@@ -250,7 +250,7 @@ module azureBotRegistration './botRegistration/azurebot.bicep' = {
     ssoAppClientId: ssoAppClientId
     ssoAppClientSecret: ssoAppClientSecret
     graphScopes: empty(graphScopes)
-      ? 'User.Read Sites.Read.All Files.Read.All Mail.Read Calendars.ReadWrite Tasks.ReadWrite People.Read User.ReadBasic.All'
+      ? 'User.Read Sites.Read.All Files.Read.All Mail.Read Calendars.Read Tasks.Read People.Read User.ReadBasic.All'
       : graphScopes
   }
 }

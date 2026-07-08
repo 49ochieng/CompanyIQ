@@ -78,17 +78,17 @@ Hard rules:
 4. If it produces a new render shape, extend [src/formatting/responseFormatter.js](src/formatting/responseFormatter.js).
 5. Log through the existing JSON-line audit events (no user content in logs).
 
-## Identity architecture — one SSO app for all environments
+## Identity architecture — one CompanyIQ SSO app, one URI per bot
 
-A single, externally managed Entra app is the SSO/identity app everywhere; the toolkit never manages it (no `aadApp/create`/`aadApp/update` in any yml). It exposes `access_as_user` at `api://<its appId>`, pre-authorizes the Teams clients, and holds admin consent for the delegated Graph scopes (`Calendars.ReadWrite`/`Tasks.ReadWrite` are the consented supersets of the `.Read` scopes the code uses).
+Teams **bot** SSO requires the token-exchange resource URI to embed the bot's ID (`api://botid-<botId>`) — the client rejects any other shape with `resourcematchfailed`. A single CompanyIQ-owned Entra app therefore carries **one `api://botid-…` identifier URI per environment's bot** (possible because it's a v2-token app; tenant policy blocks such URIs on v1 apps, which ruled out reusing the shared Mela app for SSO).
 
 | App | Role | Where referenced |
 | - | - | - |
-| **Mela AI Meeting Assistant** (`SSO_APP_ID`, shared) | SSO + Graph delegated identity for local AND dev | `webApplicationInfo` (id + `api://<appId>` resource), OAuth connection `graph` on both bot registrations |
-| **CompanyIQlocal** (`BOT_ID`, toolkit-created) | Local Bot Framework channel credential ONLY (`CLIENT_ID`/`CLIENT_SECRET`) | `botFramework/create`, local runtime auth. Its legacy SSO surface is unused and unmanaged. |
+| **CompanyIQlocal** (`4a91eb47…` = `SSO_APP_ID` everywhere, and local `BOT_ID`) | The CompanyIQ SSO app: `access_as_user`, Teams clients pre-authorized, admin consent on the 8 delegated `.Read` scopes, identifier URIs `api://botid-<local bot>` **and** `api://botid-<dev bot>`. Locally it doubles as the bot channel credential. | `webApplicationInfo.id`; OAuth connection `graph` (client id + `companyiq-oauth` secret) on both bot registrations |
+| **Mela AI Meeting Assistant** (`7ed650f2…` = `AZURE_CLIENT_ID`) | App-only Graph credential for other integrations; NOT used for user SSO | env only |
 | **bot<suffix> managed identity** (dev) | Deployed bot channel credential | Bicep (`msaAppType: UserAssignedMSI`) |
 
-The OAuth connection (`graph`) is configured with the shared app's client ID + a dedicated secret, Token Exchange URL `api://<SSO_APP_ID>`, and the consented scope list — manually on dev.botframework.com for local, by Bicep for dev.
+`webApplicationInfo.resource` = `api://botid-${{BOT_ID}}` (resolves per environment); each connection's Token Exchange URL matches its own bot's URI. Adding an environment = add one `api://botid-<newBotId>` URI to the SSO app.
 
 ## Local vs deployed
 
