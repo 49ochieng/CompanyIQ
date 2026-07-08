@@ -88,6 +88,6 @@
     ],
     "webApplicationInfo": {
         "id": "${{SSO_APP_ID}}",
-        "resource": "api://botid-${{SSO_APP_ID}}"
+        "resource": "api://${{SSO_APP_ID}}"
     }
 }

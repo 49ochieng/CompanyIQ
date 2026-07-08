@@ -16,7 +16,7 @@ param oauthConnectionName string = 'graph'
 param ssoAppClientId string = ''
 @secure()
 param ssoAppClientSecret string = ''
-param graphScopes string = 'User.Read Sites.Read.All Files.Read.All Mail.Read Calendars.Read Tasks.Read People.Read User.ReadBasic.All'
+param graphScopes string = 'User.Read Sites.Read.All Files.Read.All Mail.Read Calendars.ReadWrite Tasks.ReadWrite People.Read User.ReadBasic.All'
 
 // Register your web service as a bot with the Bot Framework
 resource botService 'Microsoft.BotService/botServices@2021-03-01' = {
@@ -65,7 +65,8 @@ resource botOAuthConnection 'Microsoft.BotService/botServices/connections@2022-0
       }
       {
         key: 'tokenExchangeUrl'
-        value: 'api://botid-${ssoAppClientId}'
+        // The shared SSO app's Application ID URI is api://<appId>.
+        value: 'api://${ssoAppClientId}'
       }
     ]
   }

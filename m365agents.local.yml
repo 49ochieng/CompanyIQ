@@ -30,20 +30,9 @@ provision:
       # The Microsoft Entra application's object id created for bot.
       objectId: BOT_OBJECT_ID
 
-  # Locally the bot's Entra app doubles as the SSO app; the shared
-  # aad.manifest.json and Teams manifest reference SSO_APP_* names.
-  - uses: script
-    with:
-      run: |
-        echo "::set-teamsfx-env SSO_APP_ID=${{BOT_ID}}"
-        echo "::set-teamsfx-env SSO_APP_OBJECT_ID=${{BOT_OBJECT_ID}}"
-
-  # Apply the Entra app manifest: expose api://botid-<SSO_APP_ID>/access_as_user,
-  # pre-authorize the Teams clients, request delegated Graph permissions.
-  - uses: aadApp/update
-    with:
-      manifestPath: ./aad.manifest.json
-      outputFilePath: ./build/aad.manifest.${{TEAMSFX_ENV}}.json
+  # SSO uses the shared, externally managed Entra app (SSO_APP_ID in
+  # env/.env.local — the Mela AI app). The bot app created above is ONLY the
+  # Bot Framework channel credential; the toolkit manages no SSO surface.
 
   # Create or update the bot registration on dev.botframework.com
   - uses: botFramework/create

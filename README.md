@@ -78,6 +78,18 @@ Hard rules:
 4. If it produces a new render shape, extend [src/formatting/responseFormatter.js](src/formatting/responseFormatter.js).
 5. Log through the existing JSON-line audit events (no user content in logs).
 
+## Identity architecture — one SSO app for all environments
+
+A single, externally managed Entra app is the SSO/identity app everywhere; the toolkit never manages it (no `aadApp/create`/`aadApp/update` in any yml). It exposes `access_as_user` at `api://<its appId>`, pre-authorizes the Teams clients, and holds admin consent for the delegated Graph scopes (`Calendars.ReadWrite`/`Tasks.ReadWrite` are the consented supersets of the `.Read` scopes the code uses).
+
+| App | Role | Where referenced |
+| - | - | - |
+| **Mela AI Meeting Assistant** (`SSO_APP_ID`, shared) | SSO + Graph delegated identity for local AND dev | `webApplicationInfo` (id + `api://<appId>` resource), OAuth connection `graph` on both bot registrations |
+| **CompanyIQlocal** (`BOT_ID`, toolkit-created) | Local Bot Framework channel credential ONLY (`CLIENT_ID`/`CLIENT_SECRET`) | `botFramework/create`, local runtime auth. Its legacy SSO surface is unused and unmanaged. |
+| **bot<suffix> managed identity** (dev) | Deployed bot channel credential | Bicep (`msaAppType: UserAssignedMSI`) |
+
+The OAuth connection (`graph`) is configured with the shared app's client ID + a dedicated secret, Token Exchange URL `api://<SSO_APP_ID>`, and the consented scope list — manually on dev.botframework.com for local, by Bicep for dev.
+
 ## Local vs deployed
 
 | | Local / Playground | Azure (dev) |
