@@ -90,6 +90,7 @@ async function runTurn({ text, messages, conversationId, context = {}, allowedTo
                     args,
                     ok: !rejected,
                     error: rejected ? result.error : undefined,
+                    connectionName: rejected ? result.connectionName : undefined,
                     durationMs: Date.now() - startedAt,
                 });
                 logToolCall(conversationId, tool.name, args, result, Date.now() - startedAt);
@@ -111,9 +112,12 @@ async function runTurn({ text, messages, conversationId, context = {}, allowedTo
     const response = await prompt.send(text);
     let content = response.content || AF1_MESSAGE;
 
-    // A Graph tool was selected but the user has no token: the caller sends
-    // the sign-in flow and retries this question after sign-in completes.
-    const authRequired = toolCalls.some((c) => c.error === "auth_required");
+    // A user-identity tool was selected but no token exists for its audience:
+    // the caller starts the sign-in flow for that connection and retries this
+    // question after sign-in completes.
+    const authRequiredCall = toolCalls.find((c) => c.error === "auth_required");
+    const authRequired = !!authRequiredCall;
+    const authRequiredConnection = authRequiredCall ? authRequiredCall.connectionName : undefined;
 
     // Hard AF-1 guarantee: if the model tried tools and every call was
     // rejected by validation (with no successful call), never guess.
@@ -140,7 +144,7 @@ async function runTurn({ text, messages, conversationId, context = {}, allowedTo
         })
     );
 
-    return { content, toolCalls, toolResults, authRequired };
+    return { content, toolCalls, toolResults, authRequired, authRequiredConnection };
 }
 
 function logToolCall(conversationId, tool, args, result, durationMs) {

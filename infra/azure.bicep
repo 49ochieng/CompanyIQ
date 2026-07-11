@@ -38,6 +38,7 @@ param graphScopes string = ''
 param mcpServers string = '[]'
 param foundryAgents string = '[]'
 param httpAgents string = '[]'
+param fabricDataAgents string = '[]'
 
 param webAppSKU string
 
@@ -223,6 +224,10 @@ resource webApp 'Microsoft.Web/sites@2021-02-01' = {
         {
           name: 'HTTP_AGENTS'
           value: httpAgents
+        }
+        {
+          name: 'FABRIC_DATA_AGENTS'
+          value: fabricDataAgents
         }
       ]
       ftpsState: 'FtpsOnly'

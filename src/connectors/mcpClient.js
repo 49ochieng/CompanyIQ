@@ -8,6 +8,7 @@ const { StreamableHTTPClientTransport } = require("@modelcontextprotocol/sdk/cli
 const config = require("../config");
 const { getCircuit, unavailableResult } = require("./circuit");
 const { buildPayload, wrapUntrusted } = require("./payload");
+const { AUTH_REQUIRED } = require("../auth/graph");
 
 const NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const MAX_DESCRIPTION = 500;
@@ -31,12 +32,11 @@ function parseServers(raw) {
     });
 }
 
-async function withClient(server, fn) {
+async function withClient(server, fn, authHeaderOverride) {
+    const authHeader = authHeaderOverride ?? server.authHeader;
     const transport = new StreamableHTTPClientTransport(
         new URL(server.url),
-        server.authHeader
-            ? { requestInit: { headers: { Authorization: server.authHeader } } }
-            : undefined
+        authHeader ? { requestInit: { headers: { Authorization: authHeader } } } : undefined
     );
     const client = new Client({ name: "companyiq", version: "1.0.0" });
     await client.connect(transport);
@@ -45,6 +45,12 @@ async function withClient(server, fn) {
     } finally {
         await client.close().catch(() => {});
     }
+}
+
+/** True when an error is the remote service refusing THIS user (401/403). */
+function isAccessDenied(error) {
+    const text = String((error && error.message) || error || "");
+    return /\b40[13]\b/.test(text) || /unauthorized|forbidden/i.test(text);
 }
 
 /** Filter a server's tool list by its allowedTools config (if present). */
@@ -88,13 +94,29 @@ function buildToolDefinition(server, mcpTool, existingNames) {
                 if (circuit.isOpen()) {
                     return unavailableResult(`mcp:${server.name}`, circuit.status().retryInMs);
                 }
+
+                // authMode "user": the request carries the signed-in user's
+                // token for the configured audience — results are permission-
+                // trimmed by the remote service per user.
+                let authHeaderOverride;
+                if (server.authMode === "user") {
+                    const connectionName = server.connection || "fabric";
+                    const token = context && context.getAudienceToken
+                        ? await context.getAudienceToken(connectionName)
+                        : undefined;
+                    if (!token) {
+                        return { ...AUTH_REQUIRED, connectionName };
+                    }
+                    authHeaderOverride = `Bearer ${token}`;
+                }
+
                 // The model's own arguments only; optional whitelisted context
                 // fields ride along under _context. Tokens/scope are
                 // structurally excluded by buildPayload.
                 const extra = buildPayload("", context, server.allowedContext);
                 const outgoing = { ...args, ...(extra.context ? { _context: extra.context } : {}) };
 
-                const text = await circuit.exec(mcpTool.name, (signal) =>
+                const outcome = await circuit.exec(mcpTool.name, (signal) =>
                     withClient(server, async (client) => {
                         const result = await client.callTool(
                             { name: mcpTool.name, arguments: outgoing },
@@ -104,10 +126,25 @@ function buildToolDefinition(server, mcpTool, existingNames) {
                         if (result.isError) {
                             throw new Error(textFromContent(result.content) || "MCP tool returned an error");
                         }
-                        return textFromContent(result.content);
+                        return { text: textFromContent(result.content) };
+                    }, authHeaderOverride).catch((error) => {
+                        // A 401/403 under user identity is the permission model
+                        // working — surface it cleanly, don't trip the breaker.
+                        if (server.authMode === "user" && isAccessDenied(error)) {
+                            return { accessDenied: true };
+                        }
+                        throw error;
                     })
                 );
-                return wrapUntrusted(`mcp:${server.name}/${mcpTool.name}`, text);
+                if (outcome.accessDenied) {
+                    return {
+                        error: "access_denied",
+                        message:
+                            "You don't have access to this service with your account. " +
+                            "Relay this to the user; do not retry or use another tool for it.",
+                    };
+                }
+                return wrapUntrusted(`mcp:${server.name}/${mcpTool.name}`, outcome.text);
             },
         },
     };
@@ -148,4 +185,13 @@ async function loadMcpTools(registerTool, existingNames) {
     return servers.map((s) => s.name);
 }
 
-module.exports = { loadMcpTools, buildToolDefinition, filterTools, parseServers, MAX_DESCRIPTION };
+module.exports = {
+    loadMcpTools,
+    buildToolDefinition,
+    filterTools,
+    parseServers,
+    withClient,
+    textFromContent,
+    isAccessDenied,
+    MAX_DESCRIPTION,
+};

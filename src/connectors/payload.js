@@ -9,6 +9,7 @@ const ALWAYS_BLOCKED = new Set([
     "token",
     "userScope",
     "user",
+    "getAudienceToken",
 ]);
 
 /**

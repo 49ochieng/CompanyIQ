@@ -46,29 +46,48 @@ resource botServiceMsTeamsChannel 'Microsoft.BotService/botServices/channels@202
   }
 }
 
-// OAuth connection backing Teams SSO: the token service exchanges the user's
-// SSO assertion for a delegated Graph token with these scopes.
-resource botOAuthConnection 'Microsoft.BotService/botServices/connections@2022-09-15' = if (!empty(ssoAppClientId)) {
-  parent: botService
-  location: 'global'
-  name: oauthConnectionName
-  properties: {
-    serviceProviderDisplayName: 'Azure Active Directory v2'
-    serviceProviderId: '30dd229c-58e3-4a48-bdfd-91ec48eb906c' // Aadv2
-    clientId: ssoAppClientId
-    clientSecret: ssoAppClientSecret
+// OAuth connections backing Teams SSO: the token service exchanges the user's
+// SSO assertion for a delegated token per audience. 'graph' is the default
+// connection; 'fabric' and 'foundry' carry the user's identity to Fabric data
+// agents and Foundry agents (identity-propagating delegation).
+var oauthConnections = [
+  {
+    name: oauthConnectionName
     scopes: graphScopes
-    parameters: [
-      {
-        key: 'tenantID'
-        value: identityTenantId
-      }
-      {
-        key: 'tokenExchangeUrl'
-        // Teams bot SSO requires the resource URI to embed THIS bot's id
-        // (api://botid-<botId>); the SSO app carries one such URI per bot.
-        value: 'api://botid-${identityClientId}'
-      }
-    ]
   }
-}
+  {
+    name: 'fabric'
+    scopes: 'https://api.fabric.microsoft.com/.default'
+  }
+  {
+    name: 'foundry'
+    scopes: 'https://ai.azure.com/.default'
+  }
+]
+
+resource botOAuthConnections 'Microsoft.BotService/botServices/connections@2022-09-15' = [
+  for connection in oauthConnections: if (!empty(ssoAppClientId)) {
+    parent: botService
+    location: 'global'
+    name: connection.name
+    properties: {
+      serviceProviderDisplayName: 'Azure Active Directory v2'
+      serviceProviderId: '30dd229c-58e3-4a48-bdfd-91ec48eb906c' // Aadv2
+      clientId: ssoAppClientId
+      clientSecret: ssoAppClientSecret
+      scopes: connection.scopes
+      parameters: [
+        {
+          key: 'tenantID'
+          value: identityTenantId
+        }
+        {
+          key: 'tokenExchangeUrl'
+          // Teams bot SSO requires the resource URI to embed THIS bot's id
+          // (api://botid-<botId>); the SSO app carries one such URI per bot.
+          value: 'api://botid-${identityClientId}'
+        }
+      ]
+    }
+  }
+]

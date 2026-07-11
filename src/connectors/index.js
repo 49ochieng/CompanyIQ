@@ -5,15 +5,17 @@
 const { registerTool, getTools } = require("../tools");
 const { loadFoundryAgents } = require("./foundryAgent");
 const { loadHttpAgents } = require("./httpAgent");
+const { loadFabricAgents } = require("./fabricAgent");
 const { loadMcpTools } = require("./mcpClient");
 const { allCircuitStatuses } = require("./circuit");
 const config = require("../config");
 
-let summary = { foundryAgents: [], httpAgents: [], mcpServers: [] };
+let summary = { foundryAgents: [], httpAgents: [], fabricAgents: [], mcpServers: [] };
 
 async function initConnectors() {
     summary.foundryAgents = loadFoundryAgents(registerTool);
     summary.httpAgents = loadHttpAgents(registerTool);
+    summary.fabricAgents = loadFabricAgents(registerTool);
     summary.mcpServers = await loadMcpTools(
         registerTool,
         () => getTools().map((t) => t.name)
@@ -37,6 +39,7 @@ function connectorStatus() {
     return [
         ...summary.foundryAgents.map((n) => entry("foundry", n)),
         ...summary.httpAgents.map((n) => entry("http", n)),
+        ...summary.fabricAgents.map((n) => entry("fabric", n)),
         ...summary.mcpServers.map((n) => entry("mcp", n)),
     ];
 }

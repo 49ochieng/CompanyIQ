@@ -37,6 +37,11 @@ const config = {
   mcpServers: process.env.MCP_SERVERS,
   foundryAgents: process.env.FOUNDRY_AGENTS,
   httpAgents: process.env.HTTP_AGENTS,
+  // Phase 6: identity-propagating delegation. One OAuth connection per
+  // downstream audience; user tokens resolved per call.
+  fabricDataAgents: process.env.FABRIC_DATA_AGENTS,
+  fabricConnectionName: process.env.FABRIC_CONNECTION_NAME || "fabric",
+  foundryConnectionName: process.env.FOUNDRY_CONNECTION_NAME || "foundry",
 };
 
 module.exports = config;

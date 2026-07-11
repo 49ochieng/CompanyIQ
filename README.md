@@ -56,9 +56,10 @@ Hard rules:
 | `OAUTH_CONNECTION_NAME` | bot OAuth connection (default `graph`) | env file | app setting |
 | `SHAREPOINT_SITES` | comma-separated site URLs constraining SharePoint search | env file | app setting |
 | `CONNECTOR_PUBLIC_WEB_ENABLED` / `ORG_WEBSITE_ALLOWLIST` | web tool gate + domains | env file | app setting |
-| `MCP_SERVERS` | JSON: `[{name,url,authHeader?,allowedTools?,allowedContext?}]` | env file | app setting |
-| `FOUNDRY_AGENTS` | JSON: `[{name,description,projectEndpoint,agentIdOrName,allowedContext?}]` | env file | app setting |
+| `MCP_SERVERS` | JSON: `[{name,url,authHeader?,authMode?:"user",connection?,allowedTools?,allowedContext?}]` | env file | app setting |
+| `FOUNDRY_AGENTS` | JSON: `[{name,description,projectEndpoint,agentIdOrName,identity?:"user"\|"app",allowedContext?}]` | env file | app setting |
 | `HTTP_AGENTS` | JSON: `[{name,description,url,tokenEnv,allowedContext?}]` | env file | app setting |
+| `FABRIC_DATA_AGENTS` | JSON: `[{name,description,workspaceId,dataAgentId}]` — registers `ask_fabric_<name>` | env file | app setting |
 | `GRAPH_SCOPES` | delegated scope list (must match the OAuth connection) | env file | — |
 | `KEY_VAULT_URI` | enables startup secret resolution | — | Bicep output |
 | `CLIENT_ID` / `CLIENT_SECRET` / `TENANT_ID` / `BOT_TYPE` | bot identity | `.localConfigs` (generated) | Bicep (managed identity) |
@@ -89,6 +90,15 @@ Teams **bot** SSO requires the token-exchange resource URI to embed the bot's ID
 | **bot<suffix> managed identity** (dev) | Deployed bot channel credential | Bicep (`msaAppType: UserAssignedMSI`) |
 
 `webApplicationInfo.resource` = `api://botid-${{BOT_ID}}` (resolves per environment); each connection's Token Exchange URL matches its own bot's URI. Adding an environment = add one `api://botid-<newBotId>` URI to the SSO app.
+
+## Identity-propagating delegation (Fabric + Foundry as the user)
+
+The bot holds one OAuth connection per downstream audience — `graph` (default), `fabric` (`https://api.fabric.microsoft.com/.default`), `foundry` (`https://ai.azure.com/.default`) — all exchanging the same Teams SSO assertion. Tools resolve a per-audience user token at call time (`context.getAudienceToken(connection)`); a missing token triggers the sign-in flow for that specific connection and the question is retried after sign-in.
+
+- **Fabric data agents** (`FABRIC_DATA_AGENTS` → `ask_fabric_<name>`): calls the published data agent's MCP endpoint with the **user's** Fabric token, so workspace/agent permissions bind to the person asking. Consent on the SSO app: Power BI Service delegated `Item.Execute.All` + `Workspace.Read.All`.
+- **Foundry agents with `identity: "user"`**: the Responses API call carries the user's `ai.azure.com` token (consent: Microsoft Cognitive Services delegated `user_impersonation`); the user needs the **Azure AI User** role on the Foundry project. `identity: "app"` (default) keeps the bot's own credential.
+- **Hard rule (tested)**: user-identity tools never fall back to the app credential. A 401/403 surfaces as a clean "you don't have access" message — that is the permission model working, not an error — and the model is instructed to relay it without retrying or answering from another source.
+- All delegation results remain untrusted data (delimited markers, labeled sections, injection-tested).
 
 ## Local vs deployed
 

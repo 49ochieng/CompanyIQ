@@ -59,6 +59,27 @@ console.log(JSON.stringify({
   botType: process.env.BOT_TYPE || 'MultiTenant (default)',
 }));
 
+// Per-audience user tokens: the bot has one OAuth connection per downstream
+// audience (graph/fabric/foundry), all exchanging the same Teams SSO
+// assertion. Tools resolve a fresh token for their audience at call time.
+function makeAudienceTokenGetter(api, activity, isSignedIn) {
+  return async (connectionName) => {
+    if (!isSignedIn) {
+      return undefined; // no SSO sign-in at all yet
+    }
+    try {
+      const res = await api.users.token.get({
+        channelId: activity.channelId,
+        userId: activity.from.id,
+        connectionName: connectionName || config.oauthConnectionName,
+      });
+      return res?.token;
+    } catch {
+      return undefined; // no token for this audience yet → auth_required path
+    }
+  };
+}
+
 // Start the sign-in flow; on failure, log the token service's full response
 // (status + body) and tell the user plainly that sign-in is misconfigured.
 async function startSignIn(send, signin, conversationKey, diag) {
@@ -98,9 +119,14 @@ async function startSignIn(send, signin, conversationKey, diag) {
     }
   }
 
+  const connectionName = (diag && diag.connectionName) || config.oauthConnectionName;
   try {
     await signin({
-      oauthCardText: 'CompanyIQ needs you to sign in to use SharePoint, OneDrive, email, calendar, or tasks.',
+      connectionName,
+      oauthCardText:
+        connectionName === config.oauthConnectionName
+          ? 'CompanyIQ needs you to sign in to use SharePoint, OneDrive, email, calendar, or tasks.'
+          : `CompanyIQ needs your permission to access ${connectionName === 'fabric' ? 'Fabric data' : 'AI agents'} as you.`,
       signInButtonText: 'Sign In',
     });
     return true;
@@ -111,13 +137,13 @@ async function startSignIn(send, signin, conversationKey, diag) {
       status: error.response?.status ?? error.status,
       body: error.response?.data ?? error.body ?? null,
       message: error.message,
-      connectionName: config.oauthConnectionName,
+      connectionName,
       clientId: process.env.CLIENT_ID || null,
     }));
     storage.delete(`pending/${conversationKey}`);
     await send(
       "Sign-in isn't configured correctly yet. An administrator needs to check the bot's OAuth " +
-      `connection ('${config.oauthConnectionName}') — details are in the bot log.`
+      `connection ('${connectionName}') — details are in the bot log.`
     );
     return false;
   }
@@ -167,6 +193,7 @@ app.on('message', async ({ send, activity, signin, signout, isSignedIn, userToke
 
   try {
     const userContext = resolveUserContext({ isSignedIn, userToken, activity });
+    userContext.getAudienceToken = makeAudienceTokenGetter(api, activity, isSignedIn);
 
     // "sign in" / "login" as plain text triggers the flow directly.
     if (isSignInMessage(activity.text)) {
@@ -213,10 +240,15 @@ app.on('message', async ({ send, activity, signin, signout, isSignedIn, userToke
     const turnResult = await processTurn(send, conversationKey, activity.text, userContext, commandTools);
 
     if (turnResult.authRequired) {
-      // A Graph tool was selected but the user has no token: remember the
-      // question, start the sign-in flow, and retry on the `signin` event.
+      // A tool needing user identity was selected but no token exists for its
+      // audience: remember the question, start the sign-in flow for THAT
+      // connection, and retry on the `signin` event.
       storage.set(`pending/${conversationKey}`, activity.text);
-      await startSignIn(send, signin, conversationKey, { api, activity });
+      await startSignIn(send, signin, conversationKey, {
+        api,
+        activity,
+        connectionName: turnResult.authRequiredConnection,
+      });
     }
   } catch (error) {
     console.log(JSON.stringify({
@@ -237,11 +269,15 @@ app.event('signin', async (ctx) => {
   const pending = storage.get(`pending/${conversationKey}`);
 
   try {
+    // A non-default connection just completed sign-in: ctx.token belongs to
+    // that audience, so resolve identity from the default Graph connection.
+    const graphToken = await makeAudienceTokenGetter(ctx.api, ctx.activity, true)(config.oauthConnectionName);
     const userContext = resolveUserContext({
       isSignedIn: true,
-      userToken: ctx.token.token,
+      userToken: graphToken || ctx.token.token,
       activity: ctx.activity,
     });
+    userContext.getAudienceToken = makeAudienceTokenGetter(ctx.api, ctx.activity, true);
 
     if (pending) {
       storage.delete(`pending/${conversationKey}`);

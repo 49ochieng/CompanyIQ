@@ -14,6 +14,8 @@ const config = require("../config");
 const { getAzureCredential } = require("../auth/azureCredential");
 const { getCircuit, unavailableResult } = require("./circuit");
 const { buildPayload, wrapUntrusted } = require("./payload");
+const { isAccessDenied } = require("./mcpClient");
+const { AUTH_REQUIRED } = require("../auth/graph");
 
 const NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const MAX_DESCRIPTION = 500;
@@ -63,9 +65,13 @@ function extractOutputText(data) {
 }
 
 function buildAgentTool(agent) {
+    // identity: "app" (default) uses the bot's own credential;
+    // identity: "user" propagates the signed-in user's token so Foundry-side
+    // and downstream permissions bind to the person asking (HR-agent pattern).
+    const userIdentity = agent.identity === "user";
     return {
         name: `ask_agent_${agent.name}`,
-        description: `[External agent] ${(agent.description || `Delegate a task to the '${agent.name}' agent.`).trim()}`.slice(
+        description: `[External agent${userIdentity ? ", runs as the signed-in user" : ""}] ${(agent.description || `Delegate a task to the '${agent.name}' agent.`).trim()}`.slice(
             0,
             MAX_DESCRIPTION
         ),
@@ -85,18 +91,34 @@ function buildAgentTool(agent) {
                 return unavailableResult(`foundry:${agent.name}`, circuit.status().retryInMs);
             }
 
+            // HARD RULE: a user-identity agent uses the user's token or
+            // nothing. There is no fallback to the app credential — an access
+            // failure must never silently escalate privileges.
+            let bearer;
+            if (userIdentity) {
+                const token = context && context.getAudienceToken
+                    ? await context.getAudienceToken(config.foundryConnectionName)
+                    : undefined;
+                if (!token) {
+                    return { ...AUTH_REQUIRED, connectionName: config.foundryConnectionName };
+                }
+                bearer = token;
+            } else {
+                bearer = await getFoundryToken();
+            }
+
             const payload = buildPayload(args.task, context, agent.allowedContext);
             let input = payload.task;
             if (payload.context) {
                 input += `\n\n[Context: ${JSON.stringify(payload.context)}]`;
             }
 
-            const text = await circuit.exec(agent.agentIdOrName, async (signal) => {
+            const outcome = await circuit.exec(agent.agentIdOrName, async (signal) => {
                 const endpoint = agent.projectEndpoint.replace(/\/+$/, "");
                 const res = await fetch(`${endpoint}/openai/v1/responses`, {
                     method: "POST",
                     headers: {
-                        Authorization: `Bearer ${await getFoundryToken()}`,
+                        Authorization: `Bearer ${bearer}`,
                         "Content-Type": "application/json",
                     },
                     body: JSON.stringify({
@@ -106,13 +128,30 @@ function buildAgentTool(agent) {
                     signal,
                 });
                 if (!res.ok) {
+                    if (userIdentity && (res.status === 401 || res.status === 403)) {
+                        return { accessDenied: true };
+                    }
                     const detail = await res.text().catch(() => "");
                     throw new Error(`Foundry responses call failed: ${res.status} ${detail.slice(0, 200)}`);
                 }
-                return extractOutputText(await res.json());
+                return { text: extractOutputText(await res.json()) };
+            }).catch((error) => {
+                if (userIdentity && isAccessDenied(error)) {
+                    return { accessDenied: true };
+                }
+                throw error;
             });
 
-            return wrapUntrusted(`agent:${agent.name}`, text);
+            if (outcome.accessDenied) {
+                return {
+                    error: "access_denied",
+                    message:
+                        `You don't have access to the '${agent.name}' agent with your account ` +
+                        "(Azure AI User role on its Foundry project is required). This is the permission " +
+                        "model working — relay it to the user; never retry with a different identity.",
+                };
+            }
+            return wrapUntrusted(`agent:${agent.name}`, outcome.text);
         },
     };
 }

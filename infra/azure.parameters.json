@@ -68,6 +68,9 @@
     "httpAgents": {
       "value": "${{HTTP_AGENTS}}"
     },
+    "fabricDataAgents": {
+      "value": "${{FABRIC_DATA_AGENTS}}"
+    },
     "webAppSKU": {
       "value": "B1"
     },
