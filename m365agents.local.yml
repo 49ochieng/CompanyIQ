@@ -30,16 +30,17 @@ provision:
       # The Microsoft Entra application's object id created for bot.
       objectId: BOT_OBJECT_ID
 
-  # SSO uses the shared, externally managed Entra app (SSO_APP_ID in
-  # env/.env.local — the Mela AI app). The bot app created above is ONLY the
-  # Bot Framework channel credential; the toolkit manages no SSO surface.
+  # SSO uses SSO_APP_ID (env/.env.local) — the CompanyIQ Entra app, which
+  # also doubles as this bot's channel credential locally. The toolkit
+  # manages no separate SSO app registration.
 
   # The local bot was migrated from dev.botframework.com to an Azure Bot
   # resource (SingleTenant). Update its messaging endpoint to the current
-  # dev tunnel on every provision. Requires an az login on this machine.
+  # dev tunnel on every provision. Requires an az login on this machine and
+  # AZURE_SUBSCRIPTION_ID/AZURE_RESOURCE_GROUP_NAME set in env/.env.local.
   - uses: script
     with:
-      run: az resource update --subscription <AZURE_SUBSCRIPTION_ID> --resource-group <AZURE_RESOURCE_GROUP_NAME> --resource-type Microsoft.BotService/botServices --name 4a91eb47-8009-4001-9720-713ef06a9cd2 --set properties.endpoint=${{BOT_ENDPOINT}}/api/messages
+      run: az resource update --subscription ${{AZURE_SUBSCRIPTION_ID}} --resource-group ${{AZURE_RESOURCE_GROUP_NAME}} --resource-type Microsoft.BotService/botServices --name ${{BOT_ID}} --set properties.endpoint=${{BOT_ENDPOINT}}/api/messages
 
 
   # Build app package with latest env value
