@@ -2,6 +2,7 @@
 // A command either replies directly (`reply`) or routes a restricted turn
 // (`turn: { text, allowedTools }`) so the model only sees the named tools.
 const config = require("../config");
+const { scopeMapStats } = require("../auth/userContext");
 
 const HELP_TEXT = [
     "**CompanyIQ commands**",
@@ -56,12 +57,22 @@ function buildCommandOutcome(parsed, deps) {
         case "whoami": {
             const user = deps.userContext && deps.userContext.user;
             const lines = [];
+            const mapStats = scopeMapStats();
             if (user) {
                 lines.push(`**Signed in as:** ${user.upn || user.aadObjectId}${user.name ? ` (${user.name})` : ""}`);
                 lines.push(`**Data scope:** ${deps.userContext.userScope || "none assigned — company data queries are unavailable"}`);
+                lines.push(
+                    `**Scope map:** ${mapStats.entries} entr${mapStats.entries === 1 ? "y" : "ies"} loaded` +
+                    (deps.userContext.userScope
+                        ? " (you matched)"
+                        : mapStats.entries === 0
+                            ? " — USER_SCOPE_MAP is empty; add your UPN to it and restart"
+                            : " — none matched your UPN or object ID")
+                );
             } else {
                 lines.push("**Not signed in.**");
                 lines.push(`**Data scope:** ${config.devUserScope ? `${config.devUserScope} (development fallback)` : "none"}`);
+                lines.push(`**Scope map:** ${mapStats.entries} entr${mapStats.entries === 1 ? "y" : "ies"} loaded (applies after sign-in)`);
             }
             const graphReady = !!(deps.userContext && deps.userContext.graphToken);
             const available = deps.toolNames.filter((name) => {

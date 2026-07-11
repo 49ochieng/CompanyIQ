@@ -74,4 +74,9 @@ function resolveUserContext(ctx) {
     return { user, userScope, graphToken: ctx.userToken };
 }
 
-module.exports = { resolveUserContext, decodeJwtPayload };
+/** Diagnostics for /whoami: how many mappings the runtime actually loaded. */
+function scopeMapStats() {
+    return { entries: Object.keys(loadScopeMap()).length };
+}
+
+module.exports = { resolveUserContext, decodeJwtPayload, scopeMapStats };

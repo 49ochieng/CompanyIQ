@@ -67,10 +67,28 @@ test("/whoami reports identity, scope, and gated tools", () => {
     assert.match(outcome.reply, /jane@armely\.com/);
     assert.match(outcome.reply, /RETAILER_100/);
     assert.match(outcome.reply, /searchEmail/);
+    assert.match(outcome.reply, /Scope map:.*\(you matched\)/);
 
     const signedOut = buildCommandOutcome({ command: "whoami", args: "" }, DEPS);
     assert.match(signedOut.reply, /Not signed in/);
+    assert.match(signedOut.reply, /Scope map:/);
     assert.ok(!signedOut.reply.includes("searchEmail, findPeople"));
+});
+
+test("/whoami flags a signed-in user the scope map failed to match", () => {
+    const config = require("../config");
+    const original = config.userScopeMap;
+    config.userScopeMap = JSON.stringify({ "other@armely.com": "RETAILER_200" });
+    try {
+        const outcome = buildCommandOutcome(
+            { command: "whoami", args: "" },
+            { ...DEPS, userContext: { user: { upn: "jane@armely.com" }, graphToken: "tok" } }
+        );
+        assert.match(outcome.reply, /none assigned/);
+        assert.match(outcome.reply, /1 entry loaded — none matched/);
+    } finally {
+        config.userScopeMap = original;
+    }
 });
 
 test("plain 'sign in'/'login' messages are detected as sign-in requests", () => {
