@@ -4,6 +4,8 @@ const fs = require("fs");
 const path = require("path");
 const config = require("../config");
 const { getTools } = require("../tools");
+const { getActions } = require("../actions");
+const { proposeAction } = require("../actions/runner");
 const { getOpenAITokenProvider } = require("../auth/azureCredential");
 
 // AF-1 fallback (UC-01): the exact reply for unknown or unparseable requests.
@@ -54,9 +56,13 @@ function buildInstructions(context) {
  * (slash-command routing); omitted = all registered tools.
  * @returns {Promise<{content: string, toolCalls: Array, toolResults: Object}>}
  */
-async function runTurn({ text, messages, conversationId, context = {}, allowedTools }) {
+async function runTurn({ text, messages, conversationId, context = {}, allowedTools, actionsEnabled = false }) {
     const turnStartedAt = Date.now();
     const toolCalls = [];
+    // Proposed confirmed actions this turn (rendered as cards by the caller)
+    // and directly-executed no-confirmation actions.
+    const proposals = [];
+    const directActions = [];
     // Last result per tool name; the formatter uses these to render cards/citations.
     const toolResults = {};
 
@@ -109,6 +115,33 @@ async function runTurn({ text, messages, conversationId, context = {}, allowedTo
         });
     }
 
+    // Actions are registered ONLY when enabled (never in scheduled digest
+    // runs — those are strictly read-only). Action functions PROPOSE; they
+    // never execute a write. Confirmed actions become pending proposals the
+    // caller renders as cards; no-confirmation actions execute after the turn.
+    if (actionsEnabled && !allowedTools) {
+        for (const action of getActions()) {
+            prompt.function(action.name, action.description, action.parameters, async (args) => {
+                if (action.requiresConfirmation) {
+                    const proposed = proposeAction(action.name, args, { userId: context.user && context.user.aadObjectId });
+                    if (proposed.error) {
+                        return proposed;
+                    }
+                    proposals.push(proposed);
+                    return {
+                        proposed: true,
+                        message:
+                            "A confirmation card has been prepared for the user; it is NOT sent yet. " +
+                            "Briefly tell the user you've prepared it and they need to Approve or Cancel.",
+                    };
+                }
+                // No-confirmation action: queue for execution after the turn.
+                directActions.push({ name: action.name, args });
+                return { queued: true, message: "The action will run after this reply." };
+            });
+        }
+    }
+
     const response = await prompt.send(text);
     let content = response.content || AF1_MESSAGE;
 
@@ -144,7 +177,7 @@ async function runTurn({ text, messages, conversationId, context = {}, allowedTo
         })
     );
 
-    return { content, toolCalls, toolResults, authRequired, authRequiredConnection };
+    return { content, toolCalls, toolResults, authRequired, authRequiredConnection, proposals, directActions };
 }
 
 function logToolCall(conversationId, tool, args, result, durationMs) {

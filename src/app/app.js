@@ -8,6 +8,33 @@ const { resolveUserContext } = require("../auth/userContext");
 const { parseCommand, buildCommandOutcome, isSignInMessage } = require("./commands");
 const { connectorStatus } = require("../connectors");
 const { getTools } = require("../tools");
+const { confirmationActivity } = require("../formatting/actionCard");
+const { executeApproved, cancelApproved } = require("../actions/runner");
+
+// Conversation references keyed by AAD object ID, so the bot can message a
+// user proactively (self-messages, scheduled digests). Populated on every
+// incoming activity from a signed-in user.
+const conversationRefs = new LocalStorage();
+
+function rememberConversationRef(userContext, activity) {
+  if (userContext.user && userContext.user.aadObjectId) {
+    conversationRefs.set(userContext.user.aadObjectId, {
+      conversationId: activity.conversation.id,
+      channelId: activity.channelId,
+      serviceUrl: activity.serviceUrl,
+    });
+  }
+}
+
+// Proactively send text to a user's own conversation (by AAD object ID).
+async function sendToUser(aadObjectId, activityLike) {
+  const ref = conversationRefs.get(aadObjectId);
+  if (!ref) {
+    return false;
+  }
+  await app.send(ref.conversationId, activityLike);
+  return true;
+}
 
 // Create storage for conversation history
 const storage = new LocalStorage();
@@ -165,7 +192,7 @@ function capHistory(messages) {
 
 // Run one question through the orchestrator and send the formatted reply.
 // Skips persistence/reply when sign-in is required (caller handles that).
-async function processTurn(send, conversationKey, text, userContext, allowedTools) {
+async function processTurn(send, conversationKey, text, userContext, allowedTools, options = {}) {
   const messages = (storage.get(conversationKey) || []).slice();
   const turnResult = await runTurn({
     text,
@@ -173,17 +200,63 @@ async function processTurn(send, conversationKey, text, userContext, allowedTool
     conversationId: conversationKey,
     context: userContext,
     allowedTools,
+    // Actions available only for real user turns, never for read-only
+    // (command-scoped or scheduled digest) runs.
+    actionsEnabled: options.actionsEnabled === true,
   });
 
   if (turnResult.authRequired) {
     return turnResult;
   }
 
-  // runTurn's ChatPrompt shares the `messages` array, so this round's turns
-  // (including any function-call rounds) have been appended to it.
   storage.set(conversationKey, capHistory(messages));
   await send(formatResponse(turnResult));
+
+  // Render a confirmation card for each proposed (confirmed) action.
+  for (const proposal of turnResult.proposals || []) {
+    await send(confirmationActivity(proposal.proposalId, proposal.preview));
+  }
+
+  // Execute queued no-confirmation actions (structurally safe, e.g. self-msg).
+  for (const direct of turnResult.directActions || []) {
+    const { executeDirect } = require("../actions/runner");
+    await executeDirect(direct.name, direct.args, {
+      userId: userContext.user && userContext.user.aadObjectId,
+      context: userContext,
+    });
+  }
+
   return turnResult;
+}
+
+// Resolve an Approve/Cancel card click. The proposal store enforces that the
+// clicking user is the proposing user and that it hasn't expired; execution
+// applies the rate limit and audit trail.
+async function handleCardAction(send, value, userContext) {
+  const userId = userContext.user && userContext.user.aadObjectId;
+  if (!userId) {
+    await send("Please sign in before confirming an action.");
+    return;
+  }
+  if (value.companyiqAction === 'cancel') {
+    cancelApproved(value.proposalId, userId);
+    await send("Cancelled — nothing was sent.");
+    return;
+  }
+  const outcome = await executeApproved(value.proposalId, { userId, context: userContext });
+  if (outcome.ok) {
+    await send("Done ✅");
+  } else if (outcome.error === 'wrong_user') {
+    await send("That confirmation belongs to someone else.");
+  } else if (outcome.error === 'expired' || outcome.error === 'not_found') {
+    await send("That confirmation has expired. Please ask again if you still want it.");
+  } else if (outcome.error === 'rate_limited') {
+    await send(outcome.message);
+  } else if (outcome.error === 'auth_required') {
+    await send("Please sign in again to complete that action.");
+  } else {
+    await send("Sorry, that action could not be completed.");
+  }
 }
 
 // Handle incoming messages
@@ -194,6 +267,20 @@ app.on('message', async ({ send, activity, signin, signout, isSignedIn, userToke
   try {
     const userContext = resolveUserContext({ isSignedIn, userToken, activity });
     userContext.getAudienceToken = makeAudienceTokenGetter(api, activity, isSignedIn);
+    rememberConversationRef(userContext, activity);
+    // Injected so the sendTeamsMessage action can only reach THIS user.
+    userContext.sendToSelf = async (message) => {
+      if (userContext.user && userContext.user.aadObjectId) {
+        await sendToUser(userContext.user.aadObjectId, message);
+      }
+    };
+
+    // Adaptive Card Approve/Cancel arrive as a message with activity.value
+    // (no text). Resolve against the proposal store (user-bound + expiry).
+    if (activity.value && activity.value.companyiqAction) {
+      await handleCardAction(send, activity.value, userContext);
+      return;
+    }
 
     // "sign in" / "login" as plain text triggers the flow directly.
     if (isSignInMessage(activity.text)) {
@@ -237,7 +324,10 @@ app.on('message', async ({ send, activity, signin, signout, isSignedIn, userToke
       commandTools = outcome.turn.allowedTools;
     }
 
-    const turnResult = await processTurn(send, conversationKey, activity.text, userContext, commandTools);
+    // Actions enabled only for free-form user turns (not command-scoped runs).
+    const turnResult = await processTurn(send, conversationKey, activity.text, userContext, commandTools, {
+      actionsEnabled: !commandTools,
+    });
 
     if (turnResult.authRequired) {
       // A tool needing user identity was selected but no token exists for its

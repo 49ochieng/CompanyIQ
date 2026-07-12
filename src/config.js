@@ -42,6 +42,8 @@ const config = {
   fabricDataAgents: process.env.FABRIC_DATA_AGENTS,
   fabricConnectionName: process.env.FABRIC_CONNECTION_NAME || "fabric",
   foundryConnectionName: process.env.FOUNDRY_CONNECTION_NAME || "foundry",
+  // Phase 7: actions & automation.
+  actionRateLimitPerHour: parseInt(process.env.ACTION_RATE_LIMIT_PER_HOUR || "10", 10),
 };
 
 module.exports = config;
