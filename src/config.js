@@ -49,6 +49,10 @@ const config = {
   foundryConnectionName: process.env.FOUNDRY_CONNECTION_NAME || "foundry",
   // Phase 7: actions & automation.
   actionRateLimitPerHour: parseInt(process.env.ACTION_RATE_LIMIT_PER_HOUR || "10", 10),
+  // Power Automate: flow whitelist, flag-gated. The trigger URLs are secrets.
+  actionsFlowsEnabled: (process.env.ACTIONS_FLOWS_ENABLED || "").toLowerCase() === "true",
+  flows: process.env.FLOWS,
+  flowConnectionName: process.env.FLOW_CONNECTION_NAME || "flow",
   // Phase 8: keep the serverless database resumed (default on).
   dbKeepAlive: (process.env.DB_KEEPALIVE || "true").toLowerCase() !== "false",
 };

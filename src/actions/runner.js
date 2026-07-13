@@ -3,7 +3,7 @@
 // proposal (requiresConfirmation:true) or a no-confirmation action whose
 // effect is structurally safe (requiresConfirmation:false, e.g. self-message).
 const config = require("../config");
-const { getAction } = require("./index");
+const { getAction, needsConfirmation } = require("./index");
 const {
     createProposal,
     claimProposal,
@@ -29,9 +29,15 @@ function proposeAction(actionName, args, { userId }) {
     if (!validation.ok) {
         return { error: "validation_failed", message: validation.reason };
     }
+    const confirm = needsConfirmation(action, validation.args);
+    if (!confirm) {
+        // No confirmation needed for this action/arguments — the caller executes
+        // it directly after the turn (structurally safe actions only).
+        return { direct: true, args: validation.args, requiresConfirmation: false };
+    }
     const proposalId = createProposal(userId, actionName, validation.args);
     audit("action_proposed", { action: actionName, userObjectId: userId, proposalId });
-    return { proposalId, preview: validation.preview, requiresConfirmation: action.requiresConfirmation };
+    return { proposalId, preview: validation.preview, requiresConfirmation: true };
 }
 
 async function runHandler(action, args, context, userId) {
@@ -79,12 +85,16 @@ function cancelApproved(proposalId, userId) {
 /** Directly execute a no-confirmation action (validated first). */
 async function executeDirect(actionName, args, { userId, context }) {
     const action = getAction(actionName);
-    if (!action || action.requiresConfirmation) {
+    if (!action) {
         return { error: "not_direct_executable" };
     }
     const validation = action.validate(args);
     if (!validation.ok) {
         return { error: "validation_failed", message: validation.reason };
+    }
+    // A confirmation-required action can NEVER be executed on this path.
+    if (needsConfirmation(action, validation.args)) {
+        return { error: "not_direct_executable" };
     }
     return runHandler(action, validation.args, context, userId);
 }

@@ -26,3 +26,6 @@ src/data/schema-snapshot.json
 
 # generated build artifacts (resolved manifests)
 build/
+
+# digest subscriptions (local file store)
+.subscriptions.json

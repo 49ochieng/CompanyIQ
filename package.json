@@ -39,6 +39,7 @@
         "@microsoft/teams.openai": "^2.0.0",
         "@modelcontextprotocol/sdk": "^1.29.0",
         "mssql": "^12.7.0",
+        "node-cron": "^4.6.0",
         "openai": "^4.104.0"
     },
     "devDependencies": {

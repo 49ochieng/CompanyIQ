@@ -63,6 +63,10 @@ var oauthConnections = [
     name: 'foundry'
     scopes: 'https://ai.azure.com/.default'
   }
+  {
+    name: 'flow'
+    scopes: 'https://service.flow.microsoft.com/User'
+  }
 ]
 
 resource botOAuthConnections 'Microsoft.BotService/botServices/connections@2022-09-15' = [

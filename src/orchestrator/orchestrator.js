@@ -144,22 +144,26 @@ async function runTurn({ text, messages, conversationId, context = {}, allowedTo
     if (actionsEnabled && !allowedTools) {
         for (const action of getActions()) {
             prompt.function(action.name, action.description, action.parameters, async (args) => {
-                if (action.requiresConfirmation) {
-                    const proposed = proposeAction(action.name, args, { userId: context.user && context.user.aadObjectId });
-                    if (proposed.error) {
-                        return proposed;
-                    }
-                    proposals.push(proposed);
-                    return {
-                        proposed: true,
-                        message:
-                            "A confirmation card has been prepared for the user; it is NOT sent yet. " +
-                            "Briefly tell the user you've prepared it and they need to Approve or Cancel.",
-                    };
+                // proposeAction validates first, then decides (per action AND per
+                // arguments) whether a confirmation card is required. It never
+                // executes anything.
+                const proposed = proposeAction(action.name, args, {
+                    userId: context.user && context.user.aadObjectId,
+                });
+                if (proposed.error) {
+                    return proposed;
                 }
-                // No-confirmation action: queue for execution after the turn.
-                directActions.push({ name: action.name, args });
-                return { queued: true, message: "The action will run after this reply." };
+                if (proposed.direct) {
+                    directActions.push({ name: action.name, args: proposed.args });
+                    return { queued: true, message: "The action will run after this reply." };
+                }
+                proposals.push(proposed);
+                return {
+                    proposed: true,
+                    message:
+                        "A confirmation card has been prepared for the user; it is NOT done yet. " +
+                        "Briefly tell the user what you've prepared and that they need to Approve or Cancel.",
+                };
             });
         }
     }

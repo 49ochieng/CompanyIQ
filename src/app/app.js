@@ -10,6 +10,8 @@ const { connectorStatus } = require("../connectors");
 const { getTools } = require("../tools");
 const { confirmationActivity } = require("../formatting/actionCard");
 const { executeApproved, cancelApproved } = require("../actions/runner");
+const subscriptions = require("../scheduler/subscriptions");
+const digest = require("../scheduler/digest");
 
 // Conversation references keyed by AAD object ID, so the bot can message a
 // user proactively (self-messages, scheduled digests). Populated on every
@@ -22,6 +24,8 @@ function rememberConversationRef(userContext, activity) {
       conversationId: activity.conversation.id,
       channelId: activity.channelId,
       serviceUrl: activity.serviceUrl,
+      // The Teams user id is what the token service is keyed by.
+      userId: activity.from && activity.from.id,
     });
   }
 }
@@ -35,6 +39,34 @@ async function sendToUser(aadObjectId, activityLike) {
   await app.send(ref.conversationId, activityLike);
   return true;
 }
+
+// Fetch a user's token OUTSIDE a turn (for scheduled digests). The Bot
+// Framework token service is keyed by user id + connection, so no activity
+// context is needed — verified against the installed library.
+async function getUserTokenOutOfTurn(aadObjectId, sub, connectionName) {
+  const ref = conversationRefs.get(aadObjectId);
+  const userId = (ref && ref.userId) || (sub && sub.teamsUserId);
+  if (!userId) {
+    return undefined;
+  }
+  try {
+    const res = await app.api.users.token.get({
+      userId,
+      channelId: (ref && ref.channelId) || (sub && sub.channelId) || 'msteams',
+      connectionName: connectionName || config.oauthConnectionName,
+    });
+    return res && res.token;
+  } catch {
+    return undefined; // expired / revoked → caller asks the user to sign in again
+  }
+}
+
+// Resolved lazily: `app` is declared below, so this cannot capture it at
+// module-evaluation time.
+const digestDeps = {
+  get app() { return app; },
+  getUserToken: getUserTokenOutOfTurn,
+};
 
 // Create storage for conversation history
 const storage = new LocalStorage();
@@ -321,6 +353,44 @@ app.on('message', async ({ send, activity, signin, signout, isSignedIn, userToke
         await send("You're signed out. Type `sign in` to sign in again.");
         return;
       }
+      if (outcome.action === 'subscribe') {
+        if (!digest.isValidSchedule(outcome.schedule)) {
+          await send(
+            `I don't know the schedule \`${outcome.schedule}\`. Try: ` +
+            Object.keys(digest.SCHEDULES).map((s) => `\`${s}\``).join(', ') + '.'
+          );
+          return;
+        }
+        const sub = subscriptions.add({
+          userObjectId: userContext.user.aadObjectId,
+          upn: userContext.user.upn,
+          teamsUserId: activity.from.id,
+          channelId: activity.channelId,
+          conversationId: conversationKey,
+          schedule: outcome.schedule,
+          question: outcome.question,
+        });
+        digest.schedule(sub, digestDeps);
+        console.log(JSON.stringify({
+          event: 'digest_subscribed',
+          subscriptionId: sub.id,
+          userObjectId: sub.userObjectId,
+          schedule: sub.schedule,
+        }));
+        await send(
+          `Done — I'll send you "${outcome.question}" **${outcome.schedule}**. ` +
+          'Digests are read-only: they answer the question, they never take actions. `/unsubscribe` stops them.'
+        );
+        return;
+      }
+      if (outcome.action === 'unsubscribe') {
+        digest.unscheduleAllForUser(userContext.user.aadObjectId);
+        const removed = subscriptions.removeAllForUser(userContext.user.aadObjectId);
+        await send(removed > 0
+          ? `Stopped ${removed} scheduled digest${removed === 1 ? '' : 's'}.`
+          : 'You have no scheduled digests.');
+        return;
+      }
       if (outcome.reply) {
         await send(outcome.reply);
         return;
@@ -386,4 +456,10 @@ app.event('signin', async (ctx) => {
   }
 });
 
+// Restore scheduled digests after a restart.
+function startDigests() {
+  return digest.startAll(digestDeps);
+}
+
 module.exports = app;
+module.exports.startDigests = startDigests;

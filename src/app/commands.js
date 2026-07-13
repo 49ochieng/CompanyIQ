@@ -14,6 +14,8 @@ const HELP_TEXT = [
     "- `/calendar [today|week]` — your upcoming meetings",
     "- `/agents` — configured external agents/MCP servers and their status",
     "- `/web <query>` — search the public web (when enabled)",
+    "- `/subscribe daily <question>` — get the answer delivered on a schedule (`daily`, `hourly`, `test`)",
+    "- `/unsubscribe` — stop all your scheduled digests",
     "- `/signin` — sign in (you can also just type `sign in`)",
     "- `/signout` — sign out, so you can test the sign-in flow again",
     "",
@@ -122,6 +124,25 @@ function buildCommandOutcome(parsed, deps) {
             );
             return { reply: `**Configured external connectors:**\n${lines.join("\n")}` };
         }
+
+        case "subscribe": {
+            const user = deps.userContext && deps.userContext.user;
+            if (!user) {
+                return { reply: 'Please type "sign in" first — a digest runs as you, so I need to know who you are.' };
+            }
+            const m = args.match(/^(\w+)\s+([\s\S]+)$/);
+            if (!m) {
+                return { reply: "Usage: `/subscribe daily <question>` — e.g. `/subscribe daily how many items do I carry?`" };
+            }
+            const [, schedule, question] = m;
+            return { action: "subscribe", schedule: schedule.toLowerCase(), question: question.trim() };
+        }
+
+        case "unsubscribe":
+            if (!deps.userContext || !deps.userContext.user) {
+                return { reply: "You have no scheduled digests." };
+            }
+            return { action: "unsubscribe" };
 
         case "signin":
             return { action: "signin" };
