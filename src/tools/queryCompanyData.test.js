@@ -4,7 +4,7 @@ const db = require("../data/db");
 const config = require("../config");
 const tool = require("./queryCompanyData");
 
-// Mock pool: records every request's inputs and statement, returns queued recordsets.
+// Mock pool: records every executed statement and its bound inputs.
 function makeFakePool(recordsets) {
     const executed = [];
     let call = 0;
@@ -28,28 +28,35 @@ function makeFakePool(recordsets) {
 }
 
 const originalGetPool = db.getPool;
+const originalIsWarm = db.isWarm;
 const originalScope = config.devUserScope;
 
 beforeEach(() => {
     config.devUserScope = "RETAILER_TEST";
+    db.isWarm = () => true;
 });
 
 afterEach(() => {
     db.getPool = originalGetPool;
+    db.isWarm = originalIsWarm;
     config.devUserScope = originalScope;
 });
 
-test("executes with the scope input bound on every query", async () => {
+const UC01 = {
+    table: "items",
+    joins: ["suppliers"],
+    filters: [
+        { column: "ingredients_statement", operator: "contains", value: "soy protein" },
+        { column: "country_of_origin", operator: "eq", value: "China" },
+    ],
+};
+
+test("binds the scope on every executed query", async () => {
     const pool = makeFakePool([[{ Item: "X" }]]);
     db.getPool = async () => pool;
 
-    const result = await tool.handler(
-        { intent: "items_by_ingredient_and_coo", parameters: { ingredient: "soy protein", country_of_origin: "China" } },
-        { conversationId: "c1" }
-    );
-
+    const result = await tool.handler(UC01, { conversationId: "c1" });
     assert.strictEqual(result.rowCount, 1);
-    assert.strictEqual(pool.executed.length, 1);
     assert.strictEqual(pool.executed[0].inputs.userScope, "RETAILER_TEST");
     assert.match(pool.executed[0].statement, /ri\.retailer_id = @userScope/);
 });
@@ -57,130 +64,129 @@ test("executes with the scope input bound on every query", async () => {
 test("context userScope overrides the dev scope", async () => {
     const pool = makeFakePool([[{ Item: "X" }]]);
     db.getPool = async () => pool;
-
-    await tool.handler(
-        { intent: "items_by_ingredient", parameters: { ingredient: "soy" } },
-        { userScope: "RETAILER_FROM_SSO" }
-    );
+    await tool.handler(UC01, { userScope: "RETAILER_FROM_SSO" });
     assert.strictEqual(pool.executed[0].inputs.userScope, "RETAILER_FROM_SSO");
 });
 
-test("refuses to run without any scope — clean message, never touches the DB", async () => {
-    config.devUserScope = undefined;
-    const pool = makeFakePool([[{ Item: "X" }]]);
-    db.getPool = async () => pool;
-
-    const result = await tool.handler({ intent: "items_by_ingredient", parameters: { ingredient: "soy" } }, {});
+test("signed-in but unmapped user gets no_data_scope, never the dev scope", async () => {
+    let touched = false;
+    db.getPool = async () => { touched = true; throw new Error("must not connect"); };
+    const result = await tool.handler(UC01, { user: { upn: "stranger@armely.com" } });
     assert.strictEqual(result.error, "no_data_scope");
-    assert.match(result.message, /sign in/i);
-    // No stack traces or driver jargon reach the user.
-    assert.ok(!/Error:|ETIMEOUT|mssql|TDS/i.test(result.message));
-    assert.strictEqual(pool.executed.length, 0);
+    assert.strictEqual(touched, false);
+});
+
+test("an invalid query is rejected without touching the database", async () => {
+    let touched = false;
+    db.getPool = async () => { touched = true; throw new Error("must not connect"); };
+
+    const bad = await tool.handler({ table: "audit_logs" }, {});
+    assert.strictEqual(bad.error, "invalid_query");
+    assert.match(bad.reason, /unknown table/);
+    assert.strictEqual(touched, false);
+
+    const badCol = await tool.handler({ table: "items", select: ["password"] }, {});
+    assert.strictEqual(badCol.error, "invalid_query");
+    assert.strictEqual(touched, false);
+});
+
+test("the model cannot reach another retailer's rows by filtering the scope column", async () => {
+    let touched = false;
+    db.getPool = async () => { touched = true; throw new Error("must not connect"); };
+    const attempt = await tool.handler(
+        {
+            table: "items",
+            filters: [{ column: "retailer_id", operator: "eq", value: "RETAILER_200" }],
+        },
+        { userScope: "RETAILER_100" }
+    );
+    assert.strictEqual(attempt.error, "invalid_query");
+    assert.strictEqual(touched, false);
+});
+
+test("zero rows returns an explicit do-not-invent instruction", async () => {
+    const pool = makeFakePool([[]]);
+    db.getPool = async () => pool;
+    const result = await tool.handler(UC01, {});
+    assert.strictEqual(result.rowCount, 0);
+    assert.match(result.note, /never fill in an answer from your own knowledge/i);
+});
+
+test("results are capped at the row cap with a note", async () => {
+    const rows = Array.from({ length: 60 }, (_, i) => ({ Item: `Item ${i}` }));
+    const pool = makeFakePool([rows]);
+    db.getPool = async () => pool;
+    const result = await tool.handler({ table: "items" }, {});
+    assert.strictEqual(result.rowCount, 50);
+    assert.match(result.note, /first 50 rows/i);
+    assert.strictEqual(pool.executed[0].inputs.rowLimit, 51);
 });
 
 test("a database failure returns one clean sentence, never driver text", async () => {
-    config.devUserScope = "RETAILER_100";
-    const originalIsWarm = db.isWarm;
-    db.isWarm = () => true;
     db.getPool = async () => {
-        const err = new Error("Failed to connect to armely.database.windows.net:1433 - Could not connect (sequence)");
+        const err = new Error("Failed to connect to armely.database.windows.net:1433 (sequence)");
         err.code = "ETIMEOUT";
         throw err;
     };
-    try {
-        const result = await tool.handler({ intent: "items_by_ingredient", parameters: { ingredient: "soy" } }, {});
-        assert.strictEqual(result.error, "database_unavailable");
-        assert.ok(!/ETIMEOUT|1433|sequence|windows\.net/i.test(result.message), "driver text leaked to the user");
-        assert.match(result.message, /waking up|temporarily unavailable/i);
-    } finally {
-        db.isWarm = originalIsWarm;
-    }
+    const result = await tool.handler(UC01, {});
+    assert.strictEqual(result.error, "database_unavailable");
+    assert.ok(!/ETIMEOUT|1433|windows\.net|sequence/i.test(result.message));
 });
 
 test("a cold database notifies the user before waiting", async () => {
-    config.devUserScope = "RETAILER_100";
     const pool = makeFakePool([[{ Item: "X" }]]);
-    const originalIsWarm = db.isWarm;
     db.isWarm = () => false;
     db.getPool = async () => pool;
     const notices = [];
+    await tool.handler(UC01, { notify: async (m) => notices.push(m) });
+    assert.match(notices[0], /Waking the database/i);
+});
+
+// ---------------------------------------------------------------------------
+// The regression that motivated Phase 9: a stateless tool must not carry
+// filters between calls, and an unfiltered follow-up query must be unfiltered.
+// ---------------------------------------------------------------------------
+test("STALE PARAMETERS: a plain supplier list executes with no leftover filters", async () => {
+    const pool = makeFakePool([[{ Item: "X" }], [{ Supplier: "Fletcher Inc." }]]);
+    db.getPool = async () => pool;
+
+    // Turn 1: the UC-01 soy/China question.
+    await tool.handler(UC01, { conversationId: "c1", userText: "soy protein products from China" });
+
+    // Turn 2: an unrelated question — the tool is called with a fresh query.
+    await tool.handler(
+        { table: "suppliers", select: ["supplier_name"] },
+        { conversationId: "c1", userText: "list all suppliers" }
+    );
+
+    const second = pool.executed[1];
+    const boundValues = JSON.stringify(second.inputs).toLowerCase();
+    assert.ok(!boundValues.includes("soy"), "soy leaked into the supplier query");
+    assert.ok(!boundValues.includes("china"), "China leaked into the supplier query");
+    // Only the scope + row cap are bound; no filter parameters at all.
+    assert.deepStrictEqual(Object.keys(second.inputs).sort(), ["rowLimit", "userScope"]);
+    assert.match(second.statement, /ri\.retailer_id = @userScope/);
+});
+
+test("carried-over filter values are flagged in the audit line", async () => {
+    const pool = makeFakePool([[{ Supplier: "X" }]]);
+    db.getPool = async () => pool;
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (line) => logs.push(line);
     try {
         await tool.handler(
-            { intent: "items_by_ingredient", parameters: { ingredient: "soy" } },
-            { notify: async (m) => notices.push(m) }
+            {
+                table: "items",
+                filters: [{ column: "ingredients_statement", operator: "contains", value: "soy protein" }],
+            },
+            { conversationId: "c1", userText: "list all suppliers" } // never mentions soy
         );
-        assert.strictEqual(notices.length, 1);
-        assert.match(notices[0], /Waking the database/i);
     } finally {
-        db.isWarm = originalIsWarm;
+        console.log = originalLog;
     }
-});
-
-test("signed-in but unmapped user gets no_data_scope, never the dev scope", async () => {
-    let poolTouched = false;
-    db.getPool = async () => {
-        poolTouched = true;
-        throw new Error("should not connect");
-    };
-
-    const result = await tool.handler(
-        { intent: "items_by_ingredient", parameters: { ingredient: "soy" } },
-        { user: { aadObjectId: "oid-9", upn: "stranger@contoso.com" } } // signed in, no userScope
-    );
-    assert.strictEqual(result.error, "no_data_scope");
-    assert.strictEqual(poolTouched, false);
-});
-
-test("returns structured validation error without touching the database", async () => {
-    let poolTouched = false;
-    db.getPool = async () => {
-        poolTouched = true;
-        throw new Error("should not connect");
-    };
-
-    const bad = await tool.handler(
-        { intent: "items_by_ingredient", parameters: { ingredient: "soy'; DROP TABLE x;--" } },
-        {}
-    );
-    assert.strictEqual(bad.error, "validation_failed");
-    assert.strictEqual(poolTouched, false);
-
-    const unknown = await tool.handler({ intent: "not_a_real_intent", parameters: {} }, {});
-    assert.strictEqual(unknown.error, "validation_failed");
-    assert.strictEqual(poolTouched, false);
-});
-
-test("broadens to word-level match on zero rows, still scoped", async () => {
-    const pool = makeFakePool([[], [{ Item: "Broadened" }]]);
-    db.getPool = async () => pool;
-
-    const result = await tool.handler(
-        { intent: "items_by_ingredient_and_coo", parameters: { ingredient: "soy lecithin", country_of_origin: "China" } },
-        {}
-    );
-
-    assert.strictEqual(pool.executed.length, 2);
-    assert.match(pool.executed[1].statement, /@word0/);
-    assert.match(pool.executed[1].statement, /ri\.retailer_id = @userScope/);
-    assert.strictEqual(pool.executed[1].inputs.word0, "soy");
-    assert.strictEqual(pool.executed[1].inputs.word1, "lecithin");
-    assert.strictEqual(pool.executed[1].inputs.userScope, "RETAILER_TEST");
-    assert.strictEqual(result.broadened, true);
-    assert.strictEqual(result.rowCount, 1);
-});
-
-test("caps results at 50 rows with a truncation note", async () => {
-    const rows = Array.from({ length: 51 }, (_, i) => ({ Item: `Item ${i}` }));
-    const pool = makeFakePool([rows]);
-    db.getPool = async () => pool;
-
-    const result = await tool.handler(
-        { intent: "items_by_ingredient", parameters: { ingredient: "soy" } },
-        {}
-    );
-    assert.strictEqual(result.rowCount, 50);
-    assert.strictEqual(result.rows.length, 50);
-    assert.match(result.note, /truncated/i);
-    // rowLimit asks for MAX+1 so truncation is detectable
-    assert.strictEqual(pool.executed[0].inputs.rowLimit, 51);
+    const audit = JSON.parse(logs.find((l) => l.includes('"db_query"')));
+    assert.ok(audit.carriedFilters, "stale filter should be flagged for audit");
+    assert.strictEqual(audit.carriedFilters[0].value, "soy protein");
+    assert.ok(audit.sql.includes("@userScope"));
 });

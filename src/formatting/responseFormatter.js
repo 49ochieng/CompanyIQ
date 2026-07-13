@@ -1,7 +1,18 @@
 const { MessageActivity } = require("@microsoft/teams.api");
 
-// Columns rendered in the data table, in UC-01 Appendix A-02 order.
-const TABLE_COLUMNS = ["Item", "Brand", "UPC", "Supplier", "COO", "Mtl<>USA", "Ingredients Statement"];
+// Preferred column order when present (UC-01 Appendix A-02); any other columns
+// the query returned follow in the order the compiler produced them.
+const PREFERRED_ORDER = ["Item", "Brand", "UPC", "Supplier", "COO", "Mtl<>USA", "Ingredients Statement"];
+
+/** Columns to render: whatever the query actually returned, UC-01 order first. */
+function resolveColumns(data) {
+    const present = data.columns && data.columns.length > 0
+        ? data.columns
+        : Object.keys(data.rows[0] || {});
+    const preferred = PREFERRED_ORDER.filter((c) => present.includes(c));
+    const rest = present.filter((c) => !preferred.includes(c));
+    return [...preferred, ...rest];
+}
 
 /**
  * Build the outgoing MessageActivity from the orchestrator's turn result.
@@ -65,12 +76,15 @@ function formatResponse(turnResult) {
 
 /**
  * Adaptive Card (schema 1.5) with a Table element: header row + one row per result.
- * @param {{intent: string, rowCount: number, rows: Array<Object>}} data
+ * Columns are whatever the compiled query returned.
+ * @param {{columns?: string[], rowCount: number, rows: Array<Object>}} data
  */
 function buildTableCard(data) {
+    const columns = resolveColumns(data);
+
     const headerRow = {
         type: "TableRow",
-        cells: TABLE_COLUMNS.map((column) => ({
+        cells: columns.map((column) => ({
             type: "TableCell",
             items: [{ type: "TextBlock", text: column, weight: "Bolder", wrap: true }],
         })),
@@ -78,7 +92,7 @@ function buildTableCard(data) {
 
     const dataRows = data.rows.map((row) => ({
         type: "TableRow",
-        cells: TABLE_COLUMNS.map((column) => ({
+        cells: columns.map((column) => ({
             type: "TableCell",
             items: [{ type: "TextBlock", text: String(row[column] ?? ""), wrap: true }],
         })),
@@ -99,7 +113,7 @@ function buildTableCard(data) {
             {
                 type: "Table",
                 firstRowAsHeaders: true,
-                columns: TABLE_COLUMNS.map(() => ({ width: 1 })),
+                columns: columns.map(() => ({ width: 1 })),
                 rows: [headerRow, ...dataRows],
             },
         ],

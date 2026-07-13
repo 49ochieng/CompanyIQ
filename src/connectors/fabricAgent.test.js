@@ -84,7 +84,10 @@ test("hostile external content cannot change the SQL scope (scope is context-onl
         // context.userScope came from USER_SCOPE_MAP at turn start; the
         // hostile text asking for RETAILER_200 is not part of context.
         await queryCompanyData.handler(
-            { intent: "items_by_ingredient", parameters: { ingredient: "soy" } },
+            {
+                table: "items",
+                filters: [{ column: "ingredients_statement", operator: "contains", value: "soy" }],
+            },
             { userScope: "RETAILER_100", user: { upn: "jane@armely.com" }, hostileNote: HOSTILE_TEXT }
         );
         assert.strictEqual(executed[0].inputs.userScope, "RETAILER_100");

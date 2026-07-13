@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const config = require("../config");
 const { getTools } = require("../tools");
+const { describeForPrompt } = require("../data/catalog");
 const { getActions } = require("../actions");
 const { proposeAction } = require("../actions/runner");
 const { getOpenAITokenProvider } = require("../auth/azureCredential");
@@ -24,18 +25,37 @@ const instructions = fs
  * hit the fallback.
  */
 function buildInstructions(context) {
+    // The model must know exactly what is queryable, so it never guesses a
+    // column or approximates an unanswerable question with a different query.
+    // Mirror the tool's own scope resolution so the model always knows which
+    // assortment its results come from (signed-in mapping, else dev fallback).
+    const scopeName = context.userScope || config.devUserScope || "their own";
+    const schema =
+        "\n\nCOMPANY DATABASE SCHEMA (queryCompanyData) — this is everything that exists. " +
+        "Build a fresh structured query from the user's current question.\n" +
+        describeForPrompt() +
+        `\nRow-level scoping is automatic: every query you build is ALREADY restricted to this user's ` +
+        `own assortment (${scopeName}). There is no retailer column and you never need one — if the user ` +
+        `names their own retailer (e.g. "suppliers for ${scopeName}"), just run the normal query, because ` +
+        `the results are already theirs. They cannot see another retailer's data; if they ask for one, ` +
+        `say so plainly.` +
+        "\nIf a question cannot be expressed against these tables and columns, say plainly that the " +
+        "data isn't available in the company database and state what IS available — do not approximate " +
+        "it with a different query, and do not use the fallback message (that is only for input you " +
+        "cannot interpret at all).";
+
     if (context.user) {
         const scope = context.userScope
             ? `Their company data scope is ${context.userScope}.`
             : "They have no company data scope assigned.";
         return (
-            `${instructions}\n\nSigned-in user: ${context.user.name || "(name unknown)"} ` +
+            `${instructions}${schema}\n\nSigned-in user: ${context.user.name || "(name unknown)"} ` +
             `<${context.user.upn || context.user.aadObjectId}>. ${scope} ` +
             "Answer questions about their own identity directly from this line."
         );
     }
     return (
-        `${instructions}\n\nNo user is signed in. If the user asks who they are or anything ` +
+        `${instructions}${schema}\n\nNo user is signed in. If the user asks who they are or anything ` +
         'about their own identity, tell them to type "sign in" — never use the fallback message for that.'
     );
 }
@@ -88,7 +108,9 @@ async function runTurn({ text, messages, conversationId, context = {}, allowedTo
         prompt.function(tool.name, tool.description, tool.parameters, async (args) => {
             const startedAt = Date.now();
             try {
-                const result = await tool.handler(args, { conversationId, ...context });
+                // userText lets tools audit whether the model carried filter values
+            // forward from earlier turns (stale-parameter detection).
+            const result = await tool.handler(args, { conversationId, userText: text, ...context });
                 toolResults[tool.name] = result;
                 const rejected = !!(result && result.error);
                 toolCalls.push({
