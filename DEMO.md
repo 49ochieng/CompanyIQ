@@ -1,6 +1,8 @@
 # CompanyIQ — Demo Runbook
 
-The demo arc: **data → insight → action**. A scoped SQL question, a follow-up that proves conversational context, knowledge retrieval across SharePoint and email, and finally an action the user approves before it happens.
+The demo arc: **data → insight → action**. A scoped SQL question, a follow-up that proves conversational context, open-ended analysis over the same data, knowledge retrieval across SharePoint and email, and finally an action the user approves before it happens — plus two security moments (an honest refusal, and the AF-1 safety beat).
+
+**The data behind the demo:** 40 items, 12 suppliers, 12 countries of origin, split across two retailer assortments. You are `RETAILER_100` and see **26 items / 10 suppliers**. `RETAILER_200` has a different, overlapping set of 20 — which is what makes the scope story real rather than theoretical.
 
 ---
 
@@ -38,30 +40,57 @@ Shows who you are, your **data scope (RETAILER_100)**, and which tools are avail
 
 **Expect:** a short summary line, then a **3-row Adaptive Card table**: Energy Shake Mix Vanilla, Protein Power Bar 6ct, Veggie Burger Patties 4ct — with Brand, UPC, Supplier, COO, Mtl<>USA, Ingredients Statement.
 
-**Say:** *"The model never wrote a line of SQL. It picked a whitelisted intent and filled two parameters; the query is application-owned, parameterized, and carries a row-level scope predicate for my retailer."*
+**Say:** *"The model never wrote a line of SQL. It described what it wanted — a table, two filters — against a schema it's allowed to see. Our code compiled that into a parameterized statement and welded a row-level scope predicate onto it. Every value you see went in as a bound parameter."*
 
 ### Beat 3 — The follow-up (proves conversational context)
 
 > **`what about wheat?`**
 
-**Expect:** **1-row card** — Classic Noodle Bowl. The model reuses the same intent and country from the previous turn, swapping only the ingredient.
+**Expect:** **1-row card** — Classic Noodle Bowl. It keeps the country filter from the previous turn and swaps only the ingredient.
 
-**Say:** *"It kept the country of origin from my last question. That's the orchestrator carrying context, not a keyword search."*
+**Say:** *"It kept the country of origin from my last question. That's the orchestrator carrying context — and note it carried forward only what I actually referred back to."*
 
-### Beat 4 — Knowledge across systems (SharePoint)
+### Beat 4 — Open-ended analysis (proves it's a real query layer, not canned answers)
+
+This is the beat that kills "you just hardcoded the demo question". Pick one or run all three — they take seconds each.
+
+> **`Show me a breakdown of my items by country of origin`**
+
+**Expect:** an **8-row card** — a `COUNT(*)` grouped by country. United States of America 11, China 4, Canada 3, and so on.
+
+> **`Who are all my suppliers?`**
+
+**Expect:** a **10-row card**, alphabetical.
+
+> **`How many items do I carry in total?`**
+
+**Expect:** **26**.
+
+**Say:** *"None of these were anticipated. The model isn't picking from a list of canned queries — it's composing a structured query against a schema it's allowed to see: selects, filters, joins, group-bys, aggregates. And every one of them still compiles down to SQL our code owns, with the scope predicate welded on."*
+
+### Beat 5 — The honest refusal (the security moment)
+
+> **`Show me RETAILER_200's items`**
+
+**Expect:** a clean refusal, **no table, no data**:
+> *"I can only access the signed-in user's own assortment, which is automatically scoped in the company database. I can't retrieve another retailer's data such as RETAILER_200."*
+
+**Say:** *"It doesn't just decline — it can't comply. The retailer column isn't in the schema the model can see, so there's no query it could even construct to reach another retailer's rows. The scope predicate is injected by our compiler on every single statement, including joins and aggregates. That's enforced in code and asserted in tests, not left to the model's good behaviour."*
+
+### Beat 6 — Knowledge across systems (SharePoint)
 
 > **`find the latest onboarding document in SharePoint`**
 
 **Expect:** results with titles and clickable links — **only files I can see**, because the call runs on my delegated token.
 
-### Beat 5 — Email search
+### Beat 7 — Email search
 
 > **`any emails from <colleague first name> this week?`**
 
 **Expect:** it resolves the name via People search first, then returns matching messages with links.
 **Say:** *"Same identity, different system. If I couldn't see it, CompanyIQ can't see it."*
 
-### Beat 6 — The action (data → insight → action, the closer)
+### Beat 8 — The action (the closer)
 
 > **`email <colleague> a summary of this quarter's soy products`**
 
@@ -73,7 +102,7 @@ Shows who you are, your **data scope (RETAILER_100)**, and which tools are avail
 
 **Expect:** `Done ✅` — the mail is in the recipient's inbox and your Sent Items.
 
-### Beat 7 — The safety beat (AF-1)
+### Beat 9 — The safety beat (AF-1)
 
 > **`asdf qwerty blorp`**
 
@@ -83,7 +112,7 @@ Shows who you are, your **data scope (RETAILER_100)**, and which tools are avail
 
 ### Optional beat — Decline the action
 
-Repeat Beat 6 and click **Cancel** → *"Cancelled — nothing was sent."* Good if the audience asks "what if it drafts the wrong thing?"
+Repeat Beat 8 and click **Cancel** → *"Cancelled — nothing was sent."* Good if the audience asks "what if it drafts the wrong thing?"
 
 ---
 
@@ -115,7 +144,9 @@ If it *fails* rather than just appearing, check the console: a `signin_start_fai
 
 ## 4. Facts worth having in your pocket
 
-- **The model never generates SQL.** It selects from a whitelisted intent list and fills validated parameters; all SQL text lives in `src/data/intents.js`.
-- **Every data query is scope-bound.** `WHERE ri.retailer_id = @userScope` is injected into *every* statement — there is no code path that runs an unscoped query. A signed-in user with no mapping gets a refusal, never a fallback.
+- **The model never generates SQL.** It fills a structured query object (table, select, filters, joins, group-by, aggregations) using only names from a reviewed, checked-in catalog (`src/data/catalog.js`). Our compiler (`src/data/queryCompiler.js`) turns that into parameterized T-SQL. Unknown table, column, operator, or join is rejected before the database is touched.
+- **Every data query is scope-bound.** `WHERE ri.retailer_id = @userScope` is injected into *every* compiled statement — plain, joined, aggregated, grouped — and a test asserts no statement can exist without it. The retailer column is not in the catalog, so the model cannot even express a query against another retailer's rows. A signed-in user with no scope mapping gets a refusal, never a fallback.
+- **The same database also holds 26 unrelated application tables.** They are unreachable two ways over: if it isn't in the catalog, the model can't address it — **and the database login itself physically cannot read it.**
+- **The bot connects as a least-privilege login** (`companyiq_app`) whose only grant is `SELECT` on the `sbs_test` schema. It cannot write to its own tables, cannot read the other application's tables, and cannot even *see* their schema. Verified by connecting as it: `SELECT dbo.users` → *permission denied*; `DELETE sbs_test.items` → *permission denied*. Seeding uses a separate admin credential the bot never holds. **If a client asks "what if the model is jailbroken?" — the answer is that the credential behind it can only read 3 demo tables.**
 - **Actions require explicit human approval,** and content from tools, documents, or external agents can never trigger one. This is tested against live prompt-injection attempts.
 - **Delegated identity throughout:** SharePoint, OneDrive, mail, calendar, Fabric data agents — all called with the signed-in user's token, so results are trimmed to their permissions. A 401 means "you don't have access", never a silent escalation to app permissions.

@@ -4,9 +4,11 @@
 // The snapshot is gitignored: design intents against it, don't commit it.
 const fs = require("fs");
 const path = require("path");
-const { getPool, closePool } = require("./db");
+const { getPool, closePool, useAdminCredentials } = require("./db");
 
 async function main() {
+    // DDL/writes require the elevated credential; the bot never uses it.
+    useAdminCredentials();
     const pool = await getPool();
 
     const result = await pool.request().query(`

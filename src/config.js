@@ -23,6 +23,11 @@ const config = {
   sqlUser: process.env.AZURE_SQL_USERNAME || process.env.SQL_USER,
   sqlPassword: process.env.AZURE_SQL_PASSWORD || process.env.SQL_PASSWORD,
   sqlConnectionString: process.env.SQL_CONNECTION_STRING,
+  // Elevated credential used ONLY by the db:seed / db:introspect scripts
+  // (they need DDL). The running bot never uses these — it connects with the
+  // least-privilege login above, which holds SELECT on sbs_test and nothing else.
+  sqlAdminUser: process.env.AZURE_SQL_ADMIN_USERNAME,
+  sqlAdminPassword: process.env.AZURE_SQL_ADMIN_PASSWORD,
   // TEMPORARY (until SSO lands in Phase 3): row-level scope value applied to
   // every data query in place of the authenticated user's mapped identity.
   devUserScope: process.env.DEV_USER_SCOPE,

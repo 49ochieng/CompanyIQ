@@ -9,13 +9,27 @@ let keepAliveTimer;
 // on an interval so the database is never paused mid-session.
 const KEEPALIVE_INTERVAL_MS = 4 * 60 * 1000;
 
+// Admin mode is opt-in and used only by the seed/introspect CLI scripts.
+// The bot process never sets it, so it can only ever connect as the
+// least-privilege application login.
+let useAdminCredential = false;
+function useAdminCredentials() {
+    if (!config.sqlAdminUser || !config.sqlAdminPassword) {
+        throw new Error(
+            "Admin SQL credentials are not configured. Set AZURE_SQL_ADMIN_USERNAME / AZURE_SQL_ADMIN_PASSWORD " +
+            "(these are for db:seed and db:introspect only — the bot must not use them)."
+        );
+    }
+    useAdminCredential = true;
+}
+
 function buildPoolConfig() {
     if (config.sqlServer && config.sqlDatabase) {
         return {
             server: config.sqlServer,
             database: config.sqlDatabase,
-            user: config.sqlUser,
-            password: config.sqlPassword,
+            user: useAdminCredential ? config.sqlAdminUser : config.sqlUser,
+            password: useAdminCredential ? config.sqlAdminPassword : config.sqlPassword,
             options: {
                 encrypt: true, // required by Azure SQL
                 trustServerCertificate: false,
@@ -147,5 +161,6 @@ module.exports = {
     stopKeepAlive,
     isWarm,
     isColdStartError,
+    useAdminCredentials,
     KEEPALIVE_INTERVAL_MS,
 };

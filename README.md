@@ -50,7 +50,8 @@ Hard rules:
 | `AZURE_SEARCH_QUERY_KEY` | runtime search key (omit for managed identity) | env file | Key Vault `azure-search-query-key` |
 | `AZURE_SEARCH_ADMIN_KEY` | indexer scripts only | env file | — |
 | `AZURE_SQL_SERVER` / `AZURE_SQL_DATABASE` | SQL target | env file | app setting |
-| `AZURE_SQL_USERNAME` / `AZURE_SQL_PASSWORD` | SQL auth | env file | Key Vault `azure-sql-username` / `azure-sql-password` |
+| `AZURE_SQL_USERNAME` / `AZURE_SQL_PASSWORD` | SQL auth — the **least-privilege** app login (`SELECT` on `sbs_test` only; see [least-privilege-setup.sql](src/data/least-privilege-setup.sql)) | env file | Key Vault `azure-sql-username` / `azure-sql-password` |
+| `AZURE_SQL_ADMIN_USERNAME` / `AZURE_SQL_ADMIN_PASSWORD` | Elevated credential used **only** by `db:seed` / `db:introspect`. The bot never uses it. | env file | — |
 | `DEV_USER_SCOPE` | TEMPORARY scope when not signed in | env file | — (unset in Azure) |
 | `USER_SCOPE_MAP` | JSON UPN/objectId → scope | env file | app setting |
 | `OAUTH_CONNECTION_NAME` | bot OAuth connection (default `graph`) | env file | app setting |

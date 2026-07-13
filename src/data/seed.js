@@ -8,7 +8,7 @@
 //   soy protein + China, RETAILER_200  -> 2 items  (ids 5, 6)
 // No other seed row may combine (soy protein | wheat) with China, or those
 // counts shift. Everything else is free to grow.
-const { sql, getPool, closePool } = require("./db");
+const { sql, getPool, closePool, useAdminCredentials } = require("./db");
 
 const SUPPLIERS = [
     { supplier_id: 1, supplier_name: "Fletcher Inc." },
@@ -96,6 +96,8 @@ const RETAILER_ITEMS = [
 ];
 
 async function main() {
+    // DDL/writes require the elevated credential; the bot never uses it.
+    useAdminCredentials();
     const pool = await getPool();
 
     await pool.request().batch(`
