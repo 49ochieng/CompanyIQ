@@ -65,16 +65,55 @@ test("context userScope overrides the dev scope", async () => {
     assert.strictEqual(pool.executed[0].inputs.userScope, "RETAILER_FROM_SSO");
 });
 
-test("refuses to run without any scope", async () => {
+test("refuses to run without any scope — clean message, never touches the DB", async () => {
     config.devUserScope = undefined;
     const pool = makeFakePool([[{ Item: "X" }]]);
     db.getPool = async () => pool;
 
-    await assert.rejects(
-        () => tool.handler({ intent: "items_by_ingredient", parameters: { ingredient: "soy" } }, {}),
-        /scope/i
-    );
+    const result = await tool.handler({ intent: "items_by_ingredient", parameters: { ingredient: "soy" } }, {});
+    assert.strictEqual(result.error, "no_data_scope");
+    assert.match(result.message, /sign in/i);
+    // No stack traces or driver jargon reach the user.
+    assert.ok(!/Error:|ETIMEOUT|mssql|TDS/i.test(result.message));
     assert.strictEqual(pool.executed.length, 0);
+});
+
+test("a database failure returns one clean sentence, never driver text", async () => {
+    config.devUserScope = "RETAILER_100";
+    const originalIsWarm = db.isWarm;
+    db.isWarm = () => true;
+    db.getPool = async () => {
+        const err = new Error("Failed to connect to armely.database.windows.net:1433 - Could not connect (sequence)");
+        err.code = "ETIMEOUT";
+        throw err;
+    };
+    try {
+        const result = await tool.handler({ intent: "items_by_ingredient", parameters: { ingredient: "soy" } }, {});
+        assert.strictEqual(result.error, "database_unavailable");
+        assert.ok(!/ETIMEOUT|1433|sequence|windows\.net/i.test(result.message), "driver text leaked to the user");
+        assert.match(result.message, /waking up|temporarily unavailable/i);
+    } finally {
+        db.isWarm = originalIsWarm;
+    }
+});
+
+test("a cold database notifies the user before waiting", async () => {
+    config.devUserScope = "RETAILER_100";
+    const pool = makeFakePool([[{ Item: "X" }]]);
+    const originalIsWarm = db.isWarm;
+    db.isWarm = () => false;
+    db.getPool = async () => pool;
+    const notices = [];
+    try {
+        await tool.handler(
+            { intent: "items_by_ingredient", parameters: { ingredient: "soy" } },
+            { notify: async (m) => notices.push(m) }
+        );
+        assert.strictEqual(notices.length, 1);
+        assert.match(notices[0], /Waking the database/i);
+    } finally {
+        db.isWarm = originalIsWarm;
+    }
 });
 
 test("signed-in but unmapped user gets no_data_scope, never the dev scope", async () => {

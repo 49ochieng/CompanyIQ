@@ -274,6 +274,11 @@ app.on('message', async ({ send, activity, signin, signout, isSignedIn, userToke
         await sendToUser(userContext.user.aadObjectId, message);
       }
     };
+    // Lets a slow tool (e.g. a cold database) tell the user what's happening
+    // mid-turn instead of leaving them staring at nothing.
+    userContext.notify = async (message) => {
+      await send(message);
+    };
 
     // Adaptive Card Approve/Cancel arrive as a message with activity.value
     // (no text). Resolve against the proposal store (user-bound + expiry).

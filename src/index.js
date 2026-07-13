@@ -11,4 +11,15 @@ const { resolveSecrets } = require("./secrets");
 
   await app.start(process.env.PORT || process.env.port || 3978);
   console.log(`\nAgent started, app listening to`, process.env.PORT || process.env.port || 3978);
+
+  // Resume the serverless database and keep it warm, so the first (and every)
+  // data question answers instantly. Non-blocking: the bot serves immediately.
+  const db = require("./data/db");
+  db.warmUp("startup")
+    .then((ok) => {
+      if (ok) {
+        db.startKeepAlive();
+      }
+    })
+    .catch(() => {});
 })();

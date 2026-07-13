@@ -229,6 +229,10 @@ resource webApp 'Microsoft.Web/sites@2021-02-01' = {
           name: 'FABRIC_DATA_AGENTS'
           value: fabricDataAgents
         }
+        {
+          name: 'DB_KEEPALIVE'
+          value: 'true' // keep the serverless database resumed
+        }
       ]
       ftpsState: 'FtpsOnly'
     }

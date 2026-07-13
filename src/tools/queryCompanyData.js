@@ -22,8 +22,8 @@ function resolveScope(context) {
             error: {
                 error: "no_data_scope",
                 message:
-                    "Your account has no data scope assigned, so company data queries are unavailable. " +
-                    "Please contact your administrator to get access.",
+                    "Your account doesn't have a company data scope assigned yet, so I can't run data " +
+                    "queries for you — please ask your administrator to grant access.",
             },
         };
     }
@@ -32,7 +32,13 @@ function resolveScope(context) {
     if (config.devUserScope) {
         return { scope: config.devUserScope };
     }
-    throw new Error("No user scope available (sign-in or DEV_USER_SCOPE). Refusing to run an unscoped data query.");
+    // No identity and no dev fallback: refuse rather than run unscoped.
+    return {
+        error: {
+            error: "no_data_scope",
+            message: "Please sign in first so I can look up company data for your account.",
+        },
+    };
 }
 
 function bindParams(request, intentName, params) {
@@ -116,31 +122,68 @@ module.exports = {
         }
         const params = validation.params;
 
-        const pool = await db.getPool();
-        let rows = await execute(pool, buildStatement(args.intent), args.intent, params, scope);
-
-        // UC-01 BF-09 semantic assist: zero rows on an ingredient intent falls
-        // back to a broadened word-by-word LIKE match, still parameterized.
-        // A vector index over ingredient statements is a future enhancement.
+        let rows;
         let broadened = false;
-        const broadenOn = INTENTS[args.intent].broadenOn;
-        if (rows.length === 0 && broadenOn && params[broadenOn]) {
-            const words = params[broadenOn].split(/\s+/).filter(Boolean);
-            if (words.length > 1) {
-                const extraInputs = {};
-                words.forEach((w, i) => (extraInputs[`word${i}`] = w));
-                const broadParams = { ...params };
-                delete broadParams[broadenOn];
-                rows = await execute(
-                    pool,
-                    buildStatement(args.intent, { broadened: true, wordCount: words.length }),
-                    args.intent,
-                    broadParams,
-                    scope,
-                    extraInputs
-                );
-                broadened = true;
+        try {
+            // A paused serverless database takes tens of seconds to resume. Tell
+            // the user what's happening instead of letting the turn hang silently;
+            // the connection layer retries transparently.
+            let pool;
+            if (db.isWarm()) {
+                pool = await db.getPool();
+            } else {
+                if (context && typeof context.notify === "function") {
+                    await context.notify("Waking the database, one moment…");
+                }
+                pool = await db.getPool();
             }
+
+            rows = await execute(pool, buildStatement(args.intent), args.intent, params, scope);
+
+            // UC-01 BF-09 semantic assist: zero rows on an ingredient intent falls
+            // back to a broadened word-by-word LIKE match, still parameterized.
+            // A vector index over ingredient statements is a future enhancement.
+            const broadenOn = INTENTS[args.intent].broadenOn;
+            if (rows.length === 0 && broadenOn && params[broadenOn]) {
+                const words = params[broadenOn].split(/\s+/).filter(Boolean);
+                if (words.length > 1) {
+                    const extraInputs = {};
+                    words.forEach((w, i) => (extraInputs[`word${i}`] = w));
+                    const broadParams = { ...params };
+                    delete broadParams[broadenOn];
+                    rows = await execute(
+                        pool,
+                        buildStatement(args.intent, { broadened: true, wordCount: words.length }),
+                        args.intent,
+                        broadParams,
+                        scope,
+                        extraInputs
+                    );
+                    broadened = true;
+                }
+            }
+        } catch (error) {
+            // Never let driver text (ETIMEOUT, ESOCKET, TDS internals) reach the
+            // user. Log the detail; return one clean sentence for the model to
+            // relay verbatim.
+            const cold = db.isColdStartError(error);
+            console.log(
+                JSON.stringify({
+                    event: "db_error",
+                    conversationId: context && context.conversationId,
+                    intent: args.intent,
+                    coldStart: cold,
+                    errorClass: error.code || error.name || "Error",
+                    detail: String(error.message || error).slice(0, 300),
+                    durationMs: Date.now() - startedAt,
+                })
+            );
+            return {
+                error: "database_unavailable",
+                message: cold
+                    ? "The company database is waking up and didn't respond in time — please ask again in a few seconds."
+                    : "The company database is temporarily unavailable — please try again in a moment.",
+            };
         }
 
         const truncated = rows.length > MAX_ROWS;
