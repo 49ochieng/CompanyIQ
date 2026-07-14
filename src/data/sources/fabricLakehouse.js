@@ -114,6 +114,16 @@ module.exports = {
     },
 
     /**
+     * Seam for the local developer credential. Overridden in tests so the
+     * "on Azure this must be unreachable" guard can be asserted without
+     * touching the real credential chain.
+     */
+    _createDevCredential() {
+        const { DefaultAzureCredential } = require("@azure/identity");
+        return new DefaultAzureCredential();
+    },
+
+    /**
      * THE identity seam. The token always represents a PERSON.
      *
      * 1. In Teams: the signed-in user's delegated token from the bot's
@@ -141,9 +151,8 @@ module.exports = {
         }
 
         // Local developer identity — a real person, never a service principal.
-        const { DefaultAzureCredential } = require("@azure/identity");
         if (!this._devCredential) {
-            this._devCredential = new DefaultAzureCredential();
+            this._devCredential = this._createDevCredential();
             console.log(
                 JSON.stringify({
                     event: "fabric_local_identity",
