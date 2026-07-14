@@ -74,6 +74,40 @@ function formatResponse(turnResult) {
     return activity;
 }
 
+// Presentation only — how wide each known column should be relative to the
+// others, and how much text a cell may show before it is visibly clipped.
+// Anything not listed gets a sensible default.
+const COLUMN_STYLE = {
+    Item: { width: 3, maxChars: 60 },
+    "Ingredients Statement": { width: 4, maxChars: 90 },
+    Supplier: { width: 2, maxChars: 40 },
+    Brand: { width: 1.5, maxChars: 30 },
+    COO: { width: 1.5, maxChars: 30 },
+    UPC: { width: 1.2, maxChars: 16 },
+    "Mtl<>USA": { width: 0.8, maxChars: 6 },
+    Count: { width: 1, maxChars: 12 },
+};
+const DEFAULT_STYLE = { width: 1.5, maxChars: 40 };
+
+function styleFor(column) {
+    return COLUMN_STYLE[column] || DEFAULT_STYLE;
+}
+
+/**
+ * Clip long cell text at a word boundary with a visible ellipsis, so a 10-row
+ * table stays readable instead of one ingredients statement dominating it.
+ */
+function clipCell(text, maxChars) {
+    const s = String(text ?? "");
+    if (s.length <= maxChars) {
+        return s;
+    }
+    const cut = s.slice(0, maxChars);
+    const lastSpace = cut.lastIndexOf(" ");
+    const body = lastSpace > maxChars * 0.6 ? cut.slice(0, lastSpace) : cut;
+    return `${body.replace(/[,;.\s]+$/, "")}…`;
+}
+
 /**
  * Adaptive Card (schema 1.5) with a Table element: header row + one row per result.
  * Columns are whatever the compiled query returned.
@@ -81,42 +115,84 @@ function formatResponse(turnResult) {
  */
 function buildTableCard(data) {
     const columns = resolveColumns(data);
+    const styles = columns.map(styleFor);
+    // True when at least one cell was clipped, so we can say so honestly.
+    let clipped = false;
 
     const headerRow = {
         type: "TableRow",
+        style: "emphasis",
         cells: columns.map((column) => ({
             type: "TableCell",
-            items: [{ type: "TextBlock", text: column, weight: "Bolder", wrap: true }],
+            items: [
+                {
+                    type: "TextBlock",
+                    text: column,
+                    weight: "Bolder",
+                    size: "Small",
+                    wrap: true,
+                },
+            ],
         })),
     };
 
     const dataRows = data.rows.map((row) => ({
         type: "TableRow",
-        cells: columns.map((column) => ({
-            type: "TableCell",
-            items: [{ type: "TextBlock", text: String(row[column] ?? ""), wrap: true }],
-        })),
+        cells: columns.map((column, i) => {
+            const raw = String(row[column] ?? "");
+            const shown = clipCell(raw, styles[i].maxChars);
+            if (shown !== raw) {
+                clipped = true;
+            }
+            return {
+                type: "TableCell",
+                items: [
+                    {
+                        type: "TextBlock",
+                        text: shown,
+                        size: "Small",
+                        wrap: true,
+                    },
+                ],
+            };
+        }),
     }));
+
+    const body = [
+        {
+            type: "TextBlock",
+            text: `Company data — ${data.rowCount} row${data.rowCount === 1 ? "" : "s"}`,
+            weight: "Bolder",
+            size: "Medium",
+            wrap: true,
+        },
+        {
+            type: "Table",
+            firstRowAsHeaders: true,
+            gridStyle: "default",
+            showGridLines: true,
+            columns: styles.map((s) => ({ width: s.width })),
+            rows: [headerRow, ...dataRows],
+        },
+    ];
+
+    // Never clip silently — say it, and say where the full text lives.
+    if (clipped) {
+        body.push({
+            type: "TextBlock",
+            text: "_Some values are shortened to fit. Ask about a specific item to see its full details._",
+            size: "Small",
+            isSubtle: true,
+            wrap: true,
+            spacing: "Small",
+        });
+    }
 
     return {
         $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
         type: "AdaptiveCard",
         version: "1.5",
-        body: [
-            {
-                type: "TextBlock",
-                text: `Company data results (${data.rowCount} row${data.rowCount === 1 ? "" : "s"})`,
-                weight: "Bolder",
-                size: "Medium",
-                wrap: true,
-            },
-            {
-                type: "Table",
-                firstRowAsHeaders: true,
-                columns: columns.map(() => ({ width: 1 })),
-                rows: [headerRow, ...dataRows],
-            },
-        ],
+        body,
     };
 }
 

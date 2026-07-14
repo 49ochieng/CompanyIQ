@@ -8,10 +8,11 @@
 // resolveSecrets() and only then requires the app.
 const { DefaultAzureCredential } = require("@azure/identity");
 
+// The SQL username is a plain app setting (it is not a credential on its own);
+// only true secrets are resolved from the vault.
 const SECRET_TO_ENV = {
     "azure-openai-api-key": "AZURE_OPENAI_API_KEY",
     "azure-search-query-key": "AZURE_SEARCH_QUERY_KEY",
-    "azure-sql-username": "AZURE_SQL_USERNAME",
     "azure-sql-password": "AZURE_SQL_PASSWORD",
 };
 

@@ -20,7 +20,6 @@ param azureSearchIndexName string
 param azureSqlServer string
 param azureSqlDatabase string
 
-@secure()
 param azureSqlUsername string
 
 @secure()
@@ -88,13 +87,9 @@ resource secretSearchQueryKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = i
   }
 }
 
-resource secretSqlUsername 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(azureSqlUsername)) {
-  parent: keyVault
-  name: 'azure-sql-username'
-  properties: {
-    value: azureSqlUsername
-  }
-}
+// NOTE: the SQL *username* is not a credential on its own and is supplied as a
+// plain app setting (below), like the server and database names. Only the
+// password lives in Key Vault.
 
 resource secretSqlPassword 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(azureSqlPassword)) {
   parent: keyVault
@@ -200,6 +195,10 @@ resource webApp 'Microsoft.Web/sites@2021-02-01' = {
         {
           name: 'AZURE_SQL_DATABASE'
           value: azureSqlDatabase
+        }
+        {
+          name: 'AZURE_SQL_USERNAME'
+          value: azureSqlUsername
         }
         {
           name: 'USER_SCOPE_MAP'
