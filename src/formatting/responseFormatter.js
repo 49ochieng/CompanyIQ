@@ -158,10 +158,16 @@ function buildTableCard(data) {
         }),
     }));
 
+    // The source line is produced HERE, by the formatter — not by the model —
+    // so it cannot be omitted or reworded, whatever the model writes.
+    const sourceLine = data.sourceLabel
+        ? `${data.sourceLabel} — ${data.rowCount} row${data.rowCount === 1 ? "" : "s"}`
+        : `Company data — ${data.rowCount} row${data.rowCount === 1 ? "" : "s"}`;
+
     const body = [
         {
             type: "TextBlock",
-            text: `Company data — ${data.rowCount} row${data.rowCount === 1 ? "" : "s"}`,
+            text: sourceLine,
             weight: "Bolder",
             size: "Medium",
             wrap: true,
@@ -175,6 +181,20 @@ function buildTableCard(data) {
             rows: [headerRow, ...dataRows],
         },
     ];
+
+    // Identity disclosure, emitted by the formatter so the model cannot drop it.
+    // (Today both sources are user-scoped. If a source is ever switched to an
+    // app identity, this line is what tells the user their results are org-wide.)
+    if (data.sourceIdentity === "app_shared") {
+        body.push({
+            type: "TextBlock",
+            text: "Org-wide data — visible to all CompanyIQ users, not filtered by your permissions.",
+            size: "Small",
+            isSubtle: true,
+            wrap: true,
+            spacing: "Small",
+        });
+    }
 
     // Never clip silently — say it, and say where the full text lives.
     if (clipped) {

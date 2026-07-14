@@ -69,6 +69,10 @@ test("hostile external content cannot change the SQL scope (scope is context-onl
     const config = require("../config");
     const queryCompanyData = require("../tools/queryCompanyData");
     const originalGetPool = db.getPool;
+    const originalServer = config.sqlServer;
+    const originalDatabase = config.sqlDatabase;
+    config.sqlServer = config.sqlServer || "test.database.windows.net";
+    config.sqlDatabase = config.sqlDatabase || "TestDb";
     const executed = [];
     db.getPool = async () => ({
         request() {
@@ -85,6 +89,7 @@ test("hostile external content cannot change the SQL scope (scope is context-onl
         // hostile text asking for RETAILER_200 is not part of context.
         await queryCompanyData.handler(
             {
+                source: "company_sql",
                 table: "items",
                 filters: [{ column: "ingredients_statement", operator: "contains", value: "soy" }],
             },
@@ -94,6 +99,8 @@ test("hostile external content cannot change the SQL scope (scope is context-onl
         assert.ok(!JSON.stringify(executed[0].inputs).includes("RETAILER_200"));
     } finally {
         db.getPool = originalGetPool;
+        config.sqlServer = originalServer;
+        config.sqlDatabase = originalDatabase;
     }
 });
 

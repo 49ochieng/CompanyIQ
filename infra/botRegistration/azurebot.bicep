@@ -67,6 +67,13 @@ var oauthConnections = [
     name: 'flow'
     scopes: 'https://service.flow.microsoft.com/User'
   }
+  {
+    // Fabric's SQL analytics endpoint speaks TDS and requires the standard SQL
+    // audience — NOT api.fabric.microsoft.com (that one is rejected by TDS and
+    // is only used for the data-agent MCP endpoint).
+    name: 'fabric_sql'
+    scopes: 'https://database.windows.net/user_impersonation'
+  }
 ]
 
 resource botOAuthConnections 'Microsoft.BotService/botServices/connections@2022-09-15' = [

@@ -1,7 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert");
 const { compile } = require("./queryCompiler");
-const catalog = require("./catalog");
+const catalog = require("./catalogs/azureSql");
 
 const SCOPE_RE = /WHERE\s+ri\.retailer_id = @userScope/;
 

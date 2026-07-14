@@ -30,9 +30,14 @@ function makeFakePool(recordsets) {
 const originalGetPool = db.getPool;
 const originalIsWarm = db.isWarm;
 const originalScope = config.devUserScope;
+const originalServer = config.sqlServer;
+const originalDatabase = config.sqlDatabase;
 
 beforeEach(() => {
     config.devUserScope = "RETAILER_TEST";
+    // The source must be "configured" for the registry to expose it.
+    config.sqlServer = config.sqlServer || "test.database.windows.net";
+    config.sqlDatabase = config.sqlDatabase || "TestDb";
     db.isWarm = () => true;
 });
 
@@ -40,9 +45,12 @@ afterEach(() => {
     db.getPool = originalGetPool;
     db.isWarm = originalIsWarm;
     config.devUserScope = originalScope;
+    config.sqlServer = originalServer;
+    config.sqlDatabase = originalDatabase;
 });
 
 const UC01 = {
+    source: "company_sql",
     table: "items",
     joins: ["suppliers"],
     filters: [
@@ -80,12 +88,12 @@ test("an invalid query is rejected without touching the database", async () => {
     let touched = false;
     db.getPool = async () => { touched = true; throw new Error("must not connect"); };
 
-    const bad = await tool.handler({ table: "audit_logs" }, {});
+    const bad = await tool.handler({ source: "company_sql", table: "audit_logs" }, {});
     assert.strictEqual(bad.error, "invalid_query");
     assert.match(bad.reason, /unknown table/);
     assert.strictEqual(touched, false);
 
-    const badCol = await tool.handler({ table: "items", select: ["password"] }, {});
+    const badCol = await tool.handler({ source: "company_sql", table: "items", select: ["password"] }, {});
     assert.strictEqual(badCol.error, "invalid_query");
     assert.strictEqual(touched, false);
 });
@@ -95,6 +103,7 @@ test("the model cannot reach another retailer's rows by filtering the scope colu
     db.getPool = async () => { touched = true; throw new Error("must not connect"); };
     const attempt = await tool.handler(
         {
+            source: "company_sql",
             table: "items",
             filters: [{ column: "retailer_id", operator: "eq", value: "RETAILER_200" }],
         },
@@ -116,7 +125,7 @@ test("results are capped at the row cap with a note", async () => {
     const rows = Array.from({ length: 60 }, (_, i) => ({ Item: `Item ${i}` }));
     const pool = makeFakePool([rows]);
     db.getPool = async () => pool;
-    const result = await tool.handler({ table: "items" }, {});
+    const result = await tool.handler({ source: "company_sql", table: "items" }, {});
     assert.strictEqual(result.rowCount, 50);
     assert.match(result.note, /first 50 rows/i);
     assert.strictEqual(pool.executed[0].inputs.rowLimit, 51);
@@ -155,7 +164,7 @@ test("STALE PARAMETERS: a plain supplier list executes with no leftover filters"
 
     // Turn 2: an unrelated question — the tool is called with a fresh query.
     await tool.handler(
-        { table: "suppliers", select: ["supplier_name"] },
+        { source: "company_sql", table: "suppliers", select: ["supplier_name"] },
         { conversationId: "c1", userText: "list all suppliers" }
     );
 
@@ -177,6 +186,7 @@ test("carried-over filter values are flagged in the audit line", async () => {
     try {
         await tool.handler(
             {
+                source: "company_sql",
                 table: "items",
                 filters: [{ column: "ingredients_statement", operator: "contains", value: "soy protein" }],
             },

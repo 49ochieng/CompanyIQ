@@ -12,6 +12,10 @@ const { confirmationActivity } = require("../formatting/actionCard");
 const { executeApproved, cancelApproved } = require("../actions/runner");
 const subscriptions = require("../scheduler/subscriptions");
 const digest = require("../scheduler/digest");
+const dataSources = require("../data/sources");
+
+// Last successful query time per source, for /sources.
+const lastQueryAt = new Map();
 
 // Conversation references keyed by AAD object ID, so the bot can message a
 // user proactively (self-messages, scheduled digests). Populated on every
@@ -383,6 +387,29 @@ app.on('message', async ({ send, activity, signin, signout, isSignedIn, userToke
         );
         return;
       }
+      if (outcome.action === 'sources') {
+        const lines = ['**Data sources**', ''];
+        for (const s of dataSources.listAll()) {
+          if (!s.configured) {
+            lines.push(`- **${s.name}** — not configured (missing settings), so it can't be queried.`);
+            continue;
+          }
+          const source = dataSources.getSource(s.name);
+          const probe = await source.probe(userContext);
+          const health = probe.ok
+            ? `✅ reachable (${probe.latencyMs}ms)`
+            : `⛔ ${probe.message || probe.reason}`;
+          const scoping = s.scopePolicy === 'row_predicate'
+            ? 'scoped to **your** assortment (row-level predicate on every query)'
+            : 'runs as **you** — Fabric enforces your own permissions';
+          const last = lastQueryAt.get(s.name);
+          lines.push(`- **${s.name}** — ${s.label}`);
+          lines.push(`    - ${s.tableCount} tables · ${scoping}`);
+          lines.push(`    - ${health}${last ? ` · last query ${last}` : ''}`);
+        }
+        await send(lines.join('\n'));
+        return;
+      }
       if (outcome.action === 'unsubscribe') {
         digest.unscheduleAllForUser(userContext.user.aadObjectId);
         const removed = subscriptions.removeAllForUser(userContext.user.aadObjectId);
@@ -461,5 +488,11 @@ function startDigests() {
   return digest.startAll(digestDeps);
 }
 
+/** Record a successful query against a source (for /sources). */
+function noteQuery(sourceName) {
+  lastQueryAt.set(sourceName, new Date().toISOString().replace('T', ' ').slice(0, 19) + 'Z');
+}
+
 module.exports = app;
 module.exports.startDigests = startDigests;
+module.exports.noteQuery = noteQuery;

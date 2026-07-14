@@ -22,7 +22,8 @@
         "indexer:delete": "env-cmd --silent -f env/.env.playground.user node ./src/indexers/delete.js",
         "db:introspect": "env-cmd --silent -f env/.env.playground.user node ./src/data/schema-introspect.js",
         "db:seed": "env-cmd --silent -f env/.env.playground.user node ./src/data/seed.js",
-        "test": "node --test \"src/**/*.test.js\""
+        "test": "node --test \"src/**/*.test.js\"",
+        "fabric:introspect": "env-cmd --silent -f env/.env.local.user node ./src/data/fabric-introspect.js"
     },
     "repository": {
         "type": "git",

@@ -61,6 +61,9 @@ Hard rules:
 | `FOUNDRY_AGENTS` | JSON: `[{name,description,projectEndpoint,agentIdOrName,identity?:"user"\|"app",allowedContext?}]` | env file | app setting |
 | `HTTP_AGENTS` | JSON: `[{name,description,url,tokenEnv,allowedContext?}]` | env file | app setting |
 | `FABRIC_DATA_AGENTS` | JSON: `[{name,description,workspaceId,dataAgentId}]` — registers `ask_fabric_<name>` | env file | app setting |
+| `FABRIC_SQL_ENDPOINT` / `FABRIC_DATABASE` | The lakehouse SQL analytics endpoint and database. Both required, or the source is not registered (`/sources` says so). | env file | app setting |
+| `FABRIC_LOCAL_DEV_IDENTITY` | **Local only.** Use the developer's own `az login` identity for Fabric when there is no Teams SSO (playground/harness). **Hard-disabled on Azure** — otherwise `DefaultAzureCredential` would return the managed identity and silently turn this into an app-identity source. | env file | never set |
+| `FABRIC_TENANT_ID` / `FABRIC_CLIENT_ID` / `FABRIC_CLIENT_SECRET` | **Not used at runtime.** The Fabric source authenticates as the signed-in user; no service principal is involved. Kept only for reference/tools. | env file | — |
 | `GRAPH_SCOPES` | delegated scope list (must match the OAuth connection) | env file | — |
 | `KEY_VAULT_URI` | enables startup secret resolution | — | Bicep output |
 | `CLIENT_ID` / `CLIENT_SECRET` / `TENANT_ID` / `BOT_TYPE` | bot identity | `.localConfigs` (generated) | Bicep (managed identity) |
@@ -79,6 +82,26 @@ Hard rules:
 3. Teach the model when to use it: add a selection rule to [src/app/instructions.txt](src/app/instructions.txt).
 4. If it produces a new render shape, extend [src/formatting/responseFormatter.js](src/formatting/responseFormatter.js).
 5. Log through the existing JSON-line audit events (no user content in logs).
+
+## Data sources and identity
+
+CompanyIQ has two structured data sources behind **one** tool (`queryCompanyData`). The model picks a source from the catalog; it never writes SQL. Each source declares its **scope policy** in code — a source with no declared policy fails at **startup**, never silently at query time.
+
+| Source | Data | Identity | How row-level access is enforced |
+| - | - | - | - |
+| `company_sql` (Azure SQL, `sbs_test`) | Company products, suppliers, assortment | App login, **least-privilege** (`SELECT` on `sbs_test` only) | **`row_predicate`** — the compiler injects `ri.retailer_id = @userScope` into **every** statement (plain, joined, aggregated, grouped). Mandatory and unconditional; asserted in tests. |
+| `healthcare_fabric` (Fabric lakehouse SQL analytics endpoint) | Patients, providers, encounters, appointments, labs, notes | **The signed-in user** (delegated token) | **`enforced_by_source`** — the TDS connection carries the user's own token, so **Fabric enforces that user's workspace permissions inside the engine**. They see exactly what they are entitled to see. |
+
+**The Fabric source runs as the user, not as a service principal.** A spike proved the Fabric SQL analytics endpoint accepts a delegated user token over TDS, so there is no org-wide data exposure and no client secret at runtime. Two things this depends on:
+
+- **The TDS audience is `https://database.windows.net/`** — *not* `https://api.fabric.microsoft.com/`, which TDS rejects (that audience is only for the Fabric REST / data-agent MCP surface). This is why there are two Fabric OAuth connections: `fabric` (REST/MCP) and `fabric_sql` (TDS).
+- **`encrypt: true` + `trustServerCertificate: false` are mandatory.** Omitting them fails the Entra handshake and surfaces as a generic login timeout that looks exactly like a bad password.
+
+Other hard-won details: a fast `18456` login failure *after* a token was successfully acquired means Fabric-side authorization is missing (tenant setting "Service principals can call Fabric public APIs", plus the workspace/item grant) — **not** a bad credential, so don't rotate secrets chasing it. Cold lakehouse endpoints are slow on first connect, so sources warm up at startup, real queries retry, but `probe()` fails fast (single attempt, ~10s) so one dead source can never stall a user's turn.
+
+**If a source is ever switched to app identity**, its scope policy must be revisited: every user would then see identical data, and that must be labeled in every response. The formatter — not the model — emits the source label on every card, so it cannot be omitted.
+
+Cross-source joins are not supported: a single query may only reference tables from one source. A question spanning both produces two tool calls composed in prose. The catalogs are checked-in, reviewed artifacts (`src/data/catalogs/`); runtime never auto-discovers schema. Re-run `npm run fabric:introspect` deliberately when the lakehouse changes, then review the diff.
 
 ## Identity architecture — one CompanyIQ SSO app, one URI per bot
 

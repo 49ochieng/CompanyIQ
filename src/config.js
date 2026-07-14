@@ -55,6 +55,15 @@ const config = {
   flowConnectionName: process.env.FLOW_CONNECTION_NAME || "flow",
   // Phase 8: keep the serverless database resumed (default on).
   dbKeepAlive: (process.env.DB_KEEPALIVE || "true").toLowerCase() !== "false",
+  // Phase 10: Fabric lakehouse source (SQL analytics endpoint over TDS).
+  // Identity is the SIGNED-IN USER (delegated token, audience
+  // https://database.windows.net/) — no service principal at runtime.
+  fabricEndpoint: process.env.FABRIC_SQL_ENDPOINT,
+  fabricDatabase: process.env.FABRIC_DATABASE,
+  fabricSqlConnectionName: process.env.FABRIC_SQL_CONNECTION_NAME || "fabric_sql",
+  // LOCAL ONLY: use the developer's own az-login identity for Fabric when there
+  // is no Teams SSO (playground/harness). Hard-disabled when running on Azure.
+  fabricLocalDevIdentity: (process.env.FABRIC_LOCAL_DEV_IDENTITY || "").toLowerCase() === "true",
 };
 
 module.exports = config;

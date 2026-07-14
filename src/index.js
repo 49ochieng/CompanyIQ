@@ -15,14 +15,11 @@ const { resolveSecrets } = require("./secrets");
   // Re-arm any digest subscriptions that survived the restart.
   app.startDigests();
 
-  // Resume the serverless database and keep it warm, so the first (and every)
-  // data question answers instantly. Non-blocking: the bot serves immediately.
-  const db = require("./data/db");
-  db.warmUp("startup")
-    .then((ok) => {
-      if (ok) {
-        db.startKeepAlive();
-      }
-    })
+  // Warm every configured data source and log what loaded, its identity mode,
+  // and its probe result. Non-blocking: the bot serves immediately.
+  // (The Fabric source runs as the signed-in user, so at startup — with nobody
+  // signed in — it honestly reports "not_signed_in" rather than pre-warming.)
+  require("./data/sources")
+    .initSources()
     .catch(() => {});
 })();

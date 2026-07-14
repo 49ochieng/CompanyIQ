@@ -71,6 +71,12 @@
     "fabricDataAgents": {
       "value": "${{FABRIC_DATA_AGENTS}}"
     },
+    "fabricSqlEndpoint": {
+      "value": "${{FABRIC_SQL_ENDPOINT}}"
+    },
+    "fabricDatabase": {
+      "value": "${{FABRIC_DATABASE}}"
+    },
     "webAppSKU": {
       "value": "B1"
     },

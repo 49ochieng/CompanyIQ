@@ -1,28 +1,33 @@
-// Compiles a validated, structured query object into parameterized T-SQL.
+// Compiles a validated, structured query object into parameterized T-SQL,
+// against ONE catalog (one data source).
 //
 // SECURITY INVARIANTS (asserted in tests):
 //  1. The model never supplies SQL text — only catalog names and values.
 //  2. Every identifier is resolved through the catalog; unknown table/column/
 //     operator/join/aggregation is a hard rejection.
-//  3. EVERY compiled statement joins the scope table and carries
-//     `ri.retailer_id = @userScope`. There is no code path that omits it.
-//  4. Every value is bound as a typed parameter; LIKE values are escaped so
+//  3. Each catalog MUST declare a scope policy. A catalog with no policy is a
+//     configuration error and throws — never a silent unscoped query.
+//       - "row_predicate":       the scope table is joined and
+//                                `<scopeTable>.<scopeColumn> = @userScope` is
+//                                appended to EVERY statement. Mandatory.
+//       - "enforced_by_source":  the connection itself carries the signed-in
+//                                user's identity and the engine enforces their
+//                                permissions (Fabric over TDS with a delegated
+//                                token), so there is no predicate to add.
+//  4. Table-level `rowFilter`s (e.g. soft-delete flags) are applied
+//     unconditionally and cannot be disabled by the model.
+//  5. Every value is bound as a typed parameter; LIKE values are escaped so
 //     wildcards cannot be smuggled in.
-const {
-    TABLES,
-    JOINS,
-    OPERATORS,
-    AGGREGATIONS,
-    SCOPE_TABLE,
-    SCOPE_COLUMN,
-    SCOPE_TABLE_SQL,
-    MAX_ROWS,
-    getTable,
-    getColumn,
-} = require("./catalog");
+const azureSqlCatalog = require("./catalogs/azureSql");
 
 const MAX_VALUE_LENGTH = 200;
 const MAX_IN_VALUES = 20;
+const DEFAULT_MAX_ROWS = 50;
+
+// Operators/aggregations are shared across sources.
+const { OPERATORS, AGGREGATIONS } = azureSqlCatalog;
+
+const SCOPE_POLICIES = new Set(["row_predicate", "enforced_by_source"]);
 
 function reject(reason) {
     return { ok: false, reason };
@@ -31,6 +36,27 @@ function reject(reason) {
 /** Escape LIKE metacharacters so a value cannot broaden its own match. */
 function escapeLike(value) {
     return String(value).replace(/([\\%_[\]])/g, "\\$1");
+}
+
+/**
+ * Fail loudly if a catalog does not state how row-level access is enforced.
+ * Called at startup by the source registry, and again defensively here.
+ */
+function assertScopePolicy(catalog) {
+    const scope = catalog && catalog.scope;
+    if (!scope || !SCOPE_POLICIES.has(scope.policy)) {
+        throw new Error(
+            `Catalog '${(catalog && catalog.name) || "<unnamed>"}' does not declare a scope policy. ` +
+            `Every data source must state one of: ${[...SCOPE_POLICIES].join(", ")}. ` +
+            "Refusing to load a source whose row-level access rules are undefined."
+        );
+    }
+    if (scope.policy === "row_predicate" && (!scope.table || !scope.column || !scope.tableSql)) {
+        throw new Error(
+            `Catalog '${catalog.name}' declares scope policy 'row_predicate' but is missing the scope table/column.`
+        );
+    }
+    return scope;
 }
 
 function coerceValue(column, raw) {
@@ -46,7 +72,6 @@ function coerceValue(column, raw) {
         if (["false", "n", "no", "0"].includes(s)) return { ok: true, value: 0 };
         return { ok: false, reason: `'${raw}' is not a yes/no value` };
     }
-    // string
     if (typeof raw === "object" || raw === undefined || raw === null) {
         return { ok: false, reason: "value must be text" };
     }
@@ -57,13 +82,23 @@ function coerceValue(column, raw) {
 }
 
 /**
- * Compile a structured query. Returns { ok, statement, inputs, columns } or
- * { ok:false, reason }.
- *
+ * Compile a structured query against one catalog.
  * @param {Object} q { table, select, filters, joins, groupBy, aggregations, orderBy, limit }
+ * @param {Object} catalog Defaults to the Azure SQL (company data) catalog.
  */
-function compile(q) {
+function compile(q, catalog = azureSqlCatalog) {
     if (!q || typeof q !== "object") return reject("no query supplied");
+
+    const scope = assertScopePolicy(catalog);
+    const TABLES = catalog.TABLES;
+    const JOINS = catalog.JOINS;
+    const MAX_ROWS = catalog.MAX_ROWS || DEFAULT_MAX_ROWS;
+
+    const getTable = (n) => (Object.prototype.hasOwnProperty.call(TABLES, n) ? TABLES[n] : undefined);
+    const getColumn = (t, c) => {
+        const table = getTable(t);
+        return table && Object.prototype.hasOwnProperty.call(table.columns, c) ? table.columns[c] : undefined;
+    };
 
     const baseName = q.table;
     const base = getTable(baseName);
@@ -71,17 +106,18 @@ function compile(q) {
         return reject(`unknown table '${String(baseName)}' — available: ${Object.keys(TABLES).join(", ")}`);
     }
 
-    // ---- resolve joins (catalog-declared paths only) --------------------
+    // ---- joins (catalog-declared paths only) ----------------------------
     const joinedTables = new Set([baseName]);
     const joinClauses = [];
 
     function addJoin(fromName, toName) {
         if (joinedTables.has(toName)) return { ok: true };
-        // The scope table is joined by the compiler itself.
-        if (toName === SCOPE_TABLE) {
-            joinClauses.push(
-                `JOIN ${SCOPE_TABLE_SQL.sqlName} AS ${SCOPE_TABLE_SQL.alias} ON ${JOINS[`${fromName}->${SCOPE_TABLE}`].on}`
-            );
+        // The scope table is joined by the compiler itself, never by the model.
+        if (scope.policy === "row_predicate" && toName === scope.table) {
+            const key = `${fromName}->${scope.table}`;
+            const join = JOINS[key];
+            if (!join) return { ok: false, reason: `no scope join path '${key}'` };
+            joinClauses.push(`JOIN ${scope.tableSql.sqlName} AS ${scope.tableSql.alias} ON ${join.on}`);
             joinedTables.add(toName);
             return { ok: true };
         }
@@ -89,6 +125,7 @@ function compile(q) {
         const join = JOINS[key];
         if (!join) return { ok: false, reason: `no join path '${key}'` };
         const target = getTable(toName);
+        if (!target) return { ok: false, reason: `unknown join target '${toName}'` };
         joinClauses.push(`JOIN ${target.sqlName} AS ${target.alias} ON ${join.on}`);
         joinedTables.add(toName);
         return { ok: true };
@@ -100,32 +137,23 @@ function compile(q) {
         if (!r.ok) return reject(r.reason);
     }
 
-    // ---- SCOPE: always join the scope table and predicate on it ---------
-    // Walk the catalog-declared path from the base table to the scope table.
-    let scopeFrom = baseName;
-    for (const hop of base.scopeVia) {
-        const r = addJoin(scopeFrom, hop);
-        if (!r.ok) {
-            return reject(`cannot enforce row-level scope from '${baseName}': ${r.reason}`);
+    // ---- SCOPE ----------------------------------------------------------
+    if (scope.policy === "row_predicate") {
+        let from = baseName;
+        for (const hop of base.scopeVia || []) {
+            const r = addJoin(from, hop);
+            if (!r.ok) return reject(`cannot enforce row-level scope from '${baseName}': ${r.reason}`);
+            from = hop;
         }
-        scopeFrom = hop;
-    }
-    if (!joinedTables.has(SCOPE_TABLE)) {
-        // Unreachable by construction, but never emit an unscoped statement.
-        return reject(`row-level scope cannot be enforced for table '${baseName}'`);
+        if (!joinedTables.has(scope.table)) {
+            // Unreachable by construction — but never emit an unscoped statement.
+            return reject(`row-level scope cannot be enforced for table '${baseName}'`);
+        }
     }
 
     const inputs = [];
     let paramSeq = 0;
     const nextParam = () => `p${paramSeq++}`;
-
-    // ---- SELECT / aggregations / groupBy --------------------------------
-    const selectParts = [];
-    const outputColumns = [];
-
-    const aggregations = q.aggregations || [];
-    const groupBy = q.groupBy || [];
-    const isAggregate = aggregations.length > 0;
 
     function resolveColumn(name, capability) {
         for (const tableName of joinedTables) {
@@ -139,6 +167,13 @@ function compile(q) {
         }
         return { ok: false, reason: `unknown column '${String(name)}'` };
     }
+
+    // ---- SELECT / aggregations / groupBy --------------------------------
+    const selectParts = [];
+    const outputColumns = [];
+    const aggregations = q.aggregations || [];
+    const groupBy = q.groupBy || [];
+    const isAggregate = aggregations.length > 0;
 
     for (const g of groupBy) {
         const r = resolveColumn(g, "groupable");
@@ -182,7 +217,7 @@ function compile(q) {
 
     if (selectParts.length === 0) return reject("nothing to select");
 
-    // ---- WHERE (scope predicate is not optional) ------------------------
+    // ---- WHERE ----------------------------------------------------------
     const whereParts = [];
     for (const f of q.filters || []) {
         if (!f || typeof f !== "object") return reject("invalid filter");
@@ -236,13 +271,21 @@ function compile(q) {
         whereParts.push(op.sql(col.sqlName, p));
     }
 
+    // Table-level row filters (soft deletes) — unconditional, model cannot disable.
+    const rowFilters = [];
+    for (const tableName of joinedTables) {
+        const t = getTable(tableName);
+        if (t && t.rowFilter) {
+            rowFilters.push(t.rowFilter);
+        }
+    }
+
     // ---- ORDER BY --------------------------------------------------------
     let orderClause = "";
     if (q.orderBy) {
         const name = typeof q.orderBy === "string" ? q.orderBy : q.orderBy.column;
         const dirRaw = typeof q.orderBy === "object" && q.orderBy.direction ? String(q.orderBy.direction) : "asc";
         const dir = dirRaw.toLowerCase() === "desc" ? "DESC" : "ASC";
-        // Ordering by an aggregate output is expressed by its label.
         const aggLabel = outputColumns.find((l) => l.toLowerCase() === String(name).toLowerCase());
         if (isAggregate && aggLabel) {
             orderClause = `ORDER BY [${aggLabel}] ${dir}`;
@@ -272,11 +315,16 @@ function compile(q) {
         }).join(", ")}`
         : "";
 
-    // The scope predicate leads the WHERE clause, always.
-    const scopePredicate = `${SCOPE_TABLE_SQL.alias}.${SCOPE_COLUMN} = @userScope`;
-    const whereClause = whereParts.length > 0
-        ? `WHERE ${scopePredicate} AND (${whereParts.join(" AND ")})`
-        : `WHERE ${scopePredicate}`;
+    // The scope predicate leads the WHERE clause, always (row_predicate sources).
+    const conditions = [];
+    if (scope.policy === "row_predicate") {
+        conditions.push(`${scope.tableSql.alias}.${scope.column} = @userScope`);
+    }
+    conditions.push(...rowFilters);
+    const userConditions = whereParts.length > 0 ? `(${whereParts.join(" AND ")})` : "";
+    if (userConditions) conditions.push(userConditions);
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
     const distinct = !isAggregate && joinedTables.size > 1 ? "DISTINCT " : "";
 
@@ -291,7 +339,22 @@ function compile(q) {
         .filter(Boolean)
         .join("\n");
 
-    return { ok: true, statement, inputs, outputColumns, limit, isAggregate };
+    return {
+        ok: true,
+        statement,
+        inputs,
+        outputColumns,
+        limit,
+        isAggregate,
+        scopePolicy: scope.policy,
+    };
 }
 
-module.exports = { compile, escapeLike, MAX_VALUE_LENGTH, MAX_IN_VALUES };
+module.exports = {
+    compile,
+    escapeLike,
+    assertScopePolicy,
+    SCOPE_POLICIES,
+    MAX_VALUE_LENGTH,
+    MAX_IN_VALUES,
+};

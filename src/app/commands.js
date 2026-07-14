@@ -12,6 +12,7 @@ const HELP_TEXT = [
     "- `/docs <query>` — search internal documents only",
     "- `/mail <query>` — search your email only",
     "- `/calendar [today|week]` — your upcoming meetings",
+    "- `/sources` — data sources, how each is scoped, and whether they're reachable",
     "- `/agents` — configured external agents/MCP servers and their status",
     "- `/web <query>` — search the public web (when enabled)",
     "- `/subscribe daily <question>` — get the answer delivered on a schedule (`daily`, `hourly`, `test`)",
@@ -111,6 +112,9 @@ function buildCommandOutcome(parsed, deps) {
                 },
             };
         }
+
+        case "sources":
+            return { action: "sources" };
 
         case "agents": {
             const connectors = deps.connectorStatus();

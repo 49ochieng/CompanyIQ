@@ -38,6 +38,8 @@ param mcpServers string = '[]'
 param foundryAgents string = '[]'
 param httpAgents string = '[]'
 param fabricDataAgents string = '[]'
+param fabricSqlEndpoint string = ''
+param fabricDatabase string = ''
 
 param webAppSKU string
 
@@ -227,6 +229,14 @@ resource webApp 'Microsoft.Web/sites@2021-02-01' = {
         {
           name: 'FABRIC_DATA_AGENTS'
           value: fabricDataAgents
+        }
+        {
+          name: 'FABRIC_SQL_ENDPOINT'
+          value: fabricSqlEndpoint
+        }
+        {
+          name: 'FABRIC_DATABASE'
+          value: fabricDatabase
         }
         {
           name: 'DB_KEEPALIVE'

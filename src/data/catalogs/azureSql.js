@@ -180,6 +180,20 @@ const AGGREGATIONS = {
 
 const MAX_ROWS = 50;
 
+// SCOPE POLICY — required. Every catalog must state how row-level access is
+// enforced; a catalog with no declared policy is a configuration error and
+// fails at STARTUP, never silently at query time.
+//
+// This source holds one retailer's assortment per row, so the compiler injects
+// `ri.retailer_id = @userScope` into EVERY statement it produces. Mandatory and
+// unconditional — nothing may weaken it.
+const SCOPE = {
+    policy: "row_predicate",
+    table: SCOPE_TABLE,
+    column: SCOPE_COLUMN,
+    tableSql: SCOPE_TABLE_SQL,
+};
+
 /** Compact schema rendering for the system prompt. */
 function describeForPrompt() {
     const lines = [];
@@ -217,10 +231,12 @@ function findColumn(tableNames, columnName) {
 }
 
 module.exports = {
+    name: "company_sql",
     TABLES,
     JOINS,
     OPERATORS,
     AGGREGATIONS,
+    scope: SCOPE,
     SCOPE_TABLE,
     SCOPE_COLUMN,
     SCOPE_TABLE_SQL,

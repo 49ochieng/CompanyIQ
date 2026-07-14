@@ -4,7 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const config = require("../config");
 const { getTools } = require("../tools");
-const { describeForPrompt } = require("../data/catalog");
+const { describeAllForPrompt } = require("../data/sources");
 const { getActions } = require("../actions");
 const { proposeAction } = require("../actions/runner");
 const { getOpenAITokenProvider } = require("../auth/azureCredential");
@@ -31,18 +31,22 @@ function buildInstructions(context) {
     // assortment its results come from (signed-in mapping, else dev fallback).
     const scopeName = context.userScope || config.devUserScope || "their own";
     const schema =
-        "\n\nCOMPANY DATABASE SCHEMA (queryCompanyData) — this is everything that exists. " +
-        "Build a fresh structured query from the user's current question.\n" +
-        describeForPrompt() +
-        `\nRow-level scoping is automatic: every query you build is ALREADY restricted to this user's ` +
-        `own assortment (${scopeName}). There is no retailer column and you never need one — if the user ` +
-        `names their own retailer (e.g. "suppliers for ${scopeName}"), just run the normal query, because ` +
-        `the results are already theirs. They cannot see another retailer's data; if they ask for one, ` +
-        `say so plainly.` +
-        "\nIf a question cannot be expressed against these tables and columns, say plainly that the " +
-        "data isn't available in the company database and state what IS available — do not approximate " +
-        "it with a different query, and do not use the fallback message (that is only for input you " +
-        "cannot interpret at all).";
+        "\n\nDATA SOURCES (queryCompanyData) — these are the ONLY data that exist. Pick the source that " +
+        "holds what the question is about, then build a fresh structured query against that source's schema.\n\n" +
+        describeAllForPrompt() +
+        `\n\nScoping rules — never blur these two:` +
+        `\n- "company_sql" is USER-SCOPED by a row-level predicate: every query is already restricted to this ` +
+        `user's own assortment (${scopeName}). There is no retailer column and you never need one — if the user ` +
+        `names their own retailer, just run the normal query. They cannot see another retailer's data; if they ` +
+        `ask for one, say so plainly.` +
+        `\n- "healthcare_fabric" runs on the signed-in user's OWN Fabric permissions: they see exactly what they ` +
+        `are entitled to see, enforced by Fabric itself.` +
+        `\n- Never describe data from one source as if it were scoped like the other.` +
+        "\n\nA single query may only use tables from ONE source. If a question needs both (e.g. company products " +
+        "AND patient data), make two separate queryCompanyData calls and combine the answers in your reply." +
+        "\nIf a question cannot be expressed against any of these schemas, say plainly that the data isn't " +
+        "available and state what IS available — do not approximate it with a different query, and do not use " +
+        "the fallback message (that is only for input you cannot interpret at all).";
 
     if (context.user) {
         const scope = context.userScope
