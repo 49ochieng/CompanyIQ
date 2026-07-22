@@ -36,11 +36,13 @@ provision:
 
   # The local bot was migrated from dev.botframework.com to an Azure Bot
   # resource (SingleTenant). Update its messaging endpoint to the current
-  # dev tunnel on every provision. Requires an az login on this machine and
-  # AZURE_SUBSCRIPTION_ID/AZURE_RESOURCE_GROUP_NAME set in env/.env.local.
+  # dev tunnel on every provision. Delegates to scripts/bot-sync.js, which
+  # verifies the az CLI is logged into the right tenant/subscription BEFORE
+  # touching the resource and exits non-zero (failing this provision step
+  # loudly) on any mismatch instead of silently no-oping.
   - uses: script
     with:
-      run: az resource update --subscription ${{AZURE_SUBSCRIPTION_ID}} --resource-group ${{AZURE_RESOURCE_GROUP_NAME}} --resource-type Microsoft.BotService/botServices --name ${{BOT_ID}} --set properties.endpoint=${{BOT_ENDPOINT}}/api/messages
+      run: node scripts/bot-sync.js
 
 
   # Build app package with latest env value

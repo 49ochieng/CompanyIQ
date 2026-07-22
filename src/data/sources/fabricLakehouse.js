@@ -187,7 +187,18 @@ module.exports = {
         }
         let pool;
         try {
-            pool = await connect(token, { timeoutMs: PROBE_TIMEOUT_MS });
+            // Promise.race enforces the wall-clock limit. mssql's connectionTimeout
+            // only governs post-TCP TDS negotiation; a silently-dropped SYN will
+            // otherwise let the OS TCP timer run (~75 s) and stall startup.
+            pool = await Promise.race([
+                connect(token, { timeoutMs: PROBE_TIMEOUT_MS }),
+                new Promise((_, reject) =>
+                    setTimeout(
+                        () => reject(Object.assign(new Error("probe wall-clock timeout"), { code: "ETIMEOUT" })),
+                        PROBE_TIMEOUT_MS
+                    )
+                ),
+            ]);
             await pool.request().query("SELECT 1 AS ok");
             return { ok: true, latencyMs: Date.now() - startedAt };
         } catch (error) {
@@ -252,7 +263,22 @@ module.exports = {
 
     /** Resume a cold endpoint at startup so the first user question is fast. */
     async warmUp(context) {
-        const result = await this.probe(context);
+        const startedAt = Date.now();
+        // Enforce a hard wall-clock limit on the entire probe (token acquisition
+        // via DefaultAzureCredential can also hang when the credential chain is
+        // slow, so the inner mssql connectionTimeout is not enough on its own).
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(
+                () => reject(Object.assign(new Error("warmUp wall-clock timeout"), { code: "ETIMEOUT" })),
+                PROBE_TIMEOUT_MS
+            )
+        );
+        let result;
+        try {
+            result = await Promise.race([this.probe(context), timeoutPromise]);
+        } catch {
+            result = { ok: false, reason: "unreachable", latencyMs: Date.now() - startedAt };
+        }
         console.log(
             JSON.stringify({
                 event: "source_warmup",

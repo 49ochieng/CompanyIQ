@@ -16,6 +16,8 @@
         "dev:teamsfx:playground": "env-cmd --silent -f .localConfigs.playground npm run dev",
         "dev:teamsfx:launch-playground": "env-cmd --silent -f env/.env.playground agentsplayground start",
         "dev": "nodemon --inspect=9239 --signal SIGINT ./src/index.js",
+        "bot:sync": "node scripts/bot-sync.js",
+        "bot:doctor": "node scripts/bot-doctor.js",
         "start": "node ./src/index.js",
         "watch": "nodemon --exec \"npm run start\"",
         "indexer:create": "env-cmd --silent -f env/.env.playground.user node ./src/indexers/setup.js",
