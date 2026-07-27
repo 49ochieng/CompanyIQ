@@ -52,6 +52,12 @@ const config = {
   fabricDataAgents: process.env.FABRIC_DATA_AGENTS,
   fabricConnectionName: process.env.FABRIC_CONNECTION_NAME || "fabric",
   foundryConnectionName: process.env.FOUNDRY_CONNECTION_NAME || "foundry",
+  // Phase 12: Copilot Studio agents via the M365 Agents SDK Copilot Studio
+  // client. Always user-identity — there is no app-only mode (Direct Line is
+  // the app-only alternative and was deliberately rejected: it doesn't
+  // propagate the caller's identity).
+  copilotStudioAgents: process.env.COPILOT_STUDIO_AGENTS,
+  copilotStudioConnectionName: process.env.COPILOT_STUDIO_CONNECTION_NAME || "copilotstudio",
   // Phase 7: actions & automation.
   actionRateLimitPerHour: parseInt(process.env.ACTION_RATE_LIMIT_PER_HOUR || "10", 10),
   // Power Automate: flow whitelist, flag-gated. The trigger URLs are secrets.

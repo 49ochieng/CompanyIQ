@@ -64,6 +64,15 @@ var oauthConnections = [
     scopes: 'https://ai.azure.com/.default'
   }
   {
+    // Copilot Studio agents, invoked via the M365 Agents SDK Copilot Studio
+    // client. Delegated permission CopilotStudio.Copilots.Invoke on the
+    // Power Platform API (appId 8578e004-a5c6-46e7-913e-12f58912df43),
+    // resource confirmed live: `aud` on a token for this resource is
+    // https://api.powerplatform.com (checked directly, 2026-07-27).
+    name: 'copilotstudio'
+    scopes: 'https://api.powerplatform.com/.default'
+  }
+  {
     name: 'flow'
     scopes: 'https://service.flow.microsoft.com/User'
   }

@@ -38,3 +38,7 @@ Any one of:
 Put a document with a unique phrase in a SharePoint location one account can access and another cannot; make sure it's indexed into `foundryiqsharepoint001`. Ask the agent the same question as each account. If the account **without** access still gets the content, per-user trimming is off.
 
 *No action is requested here — this is information so you can decide.*
+
+## Where CompanyIQ landed (2026-07-27)
+
+CompanyIQ will not register ArmelyWorkAssistant as a connector. Not solely because of the finding above — three reasons together: our own Bing grounding agent now covers live web search, AWA's M365 tools (SharePoint/Calendar/Mail via WorkIQ) duplicate connectors CompanyIQ already has natively over Graph, and the SharePoint knowledge base issue above means it isn't safely usable as a general-purpose delegate today regardless. This isn't a verdict on AWA generally — just that it doesn't add capability CompanyIQ is missing, and the one thing it uniquely offered (its indexed SharePoint knowledge) has the trimming gap described above. Sharing so the decision and its basis are on record with you.

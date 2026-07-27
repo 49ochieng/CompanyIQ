@@ -41,6 +41,7 @@ param fabricDataAgents string = '[]'
 param fabricSqlEndpoint string = ''
 param fabricDatabase string = ''
 param parallelToolCallsEnabled string = 'true'
+param copilotStudioAgents string = '[]'
 
 param webAppSKU string
 
@@ -246,6 +247,10 @@ resource webApp 'Microsoft.Web/sites@2021-02-01' = {
         {
           name: 'PARALLEL_TOOL_CALLS_ENABLED'
           value: parallelToolCallsEnabled
+        }
+        {
+          name: 'COPILOT_STUDIO_AGENTS'
+          value: copilotStudioAgents
         }
       ]
       ftpsState: 'FtpsOnly'

@@ -74,6 +74,9 @@
     "parallelToolCallsEnabled": {
       "value": "${{PARALLEL_TOOL_CALLS_ENABLED}}"
     },
+    "copilotStudioAgents": {
+      "value": "${{COPILOT_STUDIO_AGENTS}}"
+    },
     "fabricSqlEndpoint": {
       "value": "${{FABRIC_SQL_ENDPOINT}}"
     },

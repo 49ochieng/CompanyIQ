@@ -59,8 +59,10 @@ Hard rules:
 | `CONNECTOR_PUBLIC_WEB_ENABLED` / `ORG_WEBSITE_ALLOWLIST` | web tool gate + domains | env file | app setting |
 | `MCP_SERVERS` | JSON: `[{name,url,authHeader?,authMode?:"user",connection?,allowedTools?,allowedContext?}]` | env file | app setting |
 | `FOUNDRY_AGENTS` | JSON: `[{name,description,projectEndpoint,agentIdOrName,identity?:"user"\|"app",allowedContext?}]` | env file | app setting |
-| `HTTP_AGENTS` | JSON: `[{name,description,url,tokenEnv,allowedContext?}]` | env file | app setting |
+| `HTTP_AGENTS` | JSON: `[{name,description,url,tokenEnv?,oboConnection?,allowedContext?,userScoped}]` — `tokenEnv` (static app token, `userScoped:false`) and `oboConnection` (forwards the caller's own token for that named bot OAuth connection, e.g. `"graph"`) are mutually exclusive | env file | app setting |
 | `FABRIC_DATA_AGENTS` | JSON: `[{name,description,workspaceId,dataAgentId}]` — registers `ask_fabric_<name>` | env file | app setting |
+| `COPILOT_STUDIO_AGENTS` | JSON: `[{name,description,environmentId?,schemaName?,directConnectUrl?,userScoped}]` — always runs as the signed-in user (no app-identity mode); `directConnectUrl` OR both `environmentId`+`schemaName` required | env file | app setting |
+| `COPILOT_STUDIO_CONNECTION_NAME` | bot OAuth connection carrying the user's token to Copilot Studio (default `copilotstudio`) | env file | app setting |
 | `FABRIC_SQL_ENDPOINT` / `FABRIC_DATABASE` | The lakehouse SQL analytics endpoint and database. Both required, or the source is not registered (`/sources` says so). | env file | app setting |
 | `FABRIC_LOCAL_DEV_IDENTITY` | **Local only.** Use the developer's own `az login` identity for Fabric when there is no Teams SSO (playground/harness). **Hard-disabled on Azure** — otherwise `DefaultAzureCredential` would return the managed identity and silently turn this into an app-identity source. | env file | never set |
 | `FABRIC_TENANT_ID` / `FABRIC_CLIENT_ID` / `FABRIC_CLIENT_SECRET` | **Not used at runtime.** The Fabric source authenticates as the signed-in user; no service principal is involved. Kept only for reference/tools. | env file | — |

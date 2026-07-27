@@ -36,6 +36,8 @@
         "@azure/identity": "^4.11.1",
         "@azure/keyvault-secrets": "^4.11.2",
         "@azure/search-documents": "^12.0.0",
+        "@microsoft/agents-activity": "^1.7.1",
+        "@microsoft/agents-copilotstudio-client": "^1.7.1",
         "@microsoft/teams.ai": "^2.0.0",
         "@microsoft/teams.api": "^2.0.0",
         "@microsoft/teams.apps": "^2.0.0",
