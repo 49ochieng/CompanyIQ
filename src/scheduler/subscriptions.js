@@ -39,6 +39,16 @@ function add(sub) {
     return record;
 }
 
+/** Record when a subscription last ran, so a brief can diff "since last time". */
+function setLastRun(id, iso) {
+    const subs = load();
+    const sub = subs.find((s) => s.id === id);
+    if (sub) {
+        sub.lastRunAt = iso;
+        save(subs);
+    }
+}
+
 /** Remove every subscription belonging to a user. Returns how many went. */
 function removeAllForUser(userObjectId) {
     const subs = load();
@@ -55,4 +65,4 @@ function listAll() {
     return load();
 }
 
-module.exports = { add, removeAllForUser, listForUser, listAll, load, save, STORE_PATH };
+module.exports = { add, setLastRun, removeAllForUser, listForUser, listAll, load, save, STORE_PATH };

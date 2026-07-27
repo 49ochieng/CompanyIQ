@@ -7,6 +7,7 @@
 const config = require("../config");
 const { getCircuit, unavailableResult } = require("./circuit");
 const { buildPayload, wrapUntrusted } = require("./payload");
+const { assertUserScoped } = require("./validate");
 
 const NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const MAX_DESCRIPTION = 500;
@@ -74,6 +75,7 @@ function buildAgentTool(agent) {
             });
 
             return wrapUntrusted(`agent:${agent.name}`, body.result, {
+                userScoped: agent.userScoped,
                 citations: Array.isArray(body.citations) ? body.citations.slice(0, 10) : undefined,
             });
         },
@@ -83,6 +85,7 @@ function buildAgentTool(agent) {
 function loadHttpAgents(registerTool) {
     const agents = parseAgents(config.httpAgents);
     for (const agent of agents) {
+        assertUserScoped(agent, "HTTP agent");
         registerTool(buildAgentTool(agent));
     }
     return agents.map((a) => a.name);

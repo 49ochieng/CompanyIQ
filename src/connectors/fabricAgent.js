@@ -12,6 +12,7 @@ const config = require("../config");
 const { getCircuit, unavailableResult } = require("./circuit");
 const { wrapUntrusted } = require("./payload");
 const { withClient, textFromContent, isAccessDenied } = require("./mcpClient");
+const { assertUserScoped } = require("./validate");
 const { AUTH_REQUIRED } = require("../auth/graph");
 
 const NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -117,7 +118,7 @@ function buildAgentTool(agent) {
                         "This is the permission model working — relay it to the user; never retry with a different identity or tool.",
                 };
             }
-            return wrapUntrusted(`fabric:${agent.name}`, outcome.text);
+            return wrapUntrusted(`fabric:${agent.name}`, outcome.text, { userScoped: agent.userScoped });
         },
     };
 }
@@ -125,6 +126,7 @@ function buildAgentTool(agent) {
 function loadFabricAgents(registerTool) {
     const agents = parseAgents(config.fabricDataAgents);
     for (const agent of agents) {
+        assertUserScoped(agent, "Fabric data agent");
         registerTool(buildAgentTool(agent));
     }
     return agents.map((a) => a.name);

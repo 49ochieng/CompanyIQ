@@ -16,6 +16,7 @@ const subscriptions = require("./subscriptions");
 // so a digest can be demonstrated without waiting a day.
 const SCHEDULES = {
     daily: "0 8 * * *",
+    weekly: "0 8 * * 1", // Monday 08:00 — the proactive weekly brief
     hourly: "0 * * * *",
     test: "*/2 * * * *", // every 2 minutes — for verifying the flow end to end
 };
@@ -65,6 +66,10 @@ async function runDigest(sub, deps) {
         });
         userContext.getAudienceToken = (connectionName) =>
             deps.getUserToken(sub.userObjectId, sub, connectionName);
+        // A brief that routes to watchlist_brief diffs "since the last time THIS
+        // subscription ran", so a weekly brief spans the week (not just the last
+        // daily crawl). Harmless for non-brief digests.
+        userContext.watchlistSince = sub.lastRunAt;
 
         const turnResult = await runTurn({
             text: sub.question,
@@ -78,6 +83,10 @@ async function runDigest(sub, deps) {
         const activity = formatResponse(turnResult);
         activity.text = `**Your scheduled digest** — _${sub.question}_\n\n${activity.text}`;
         await deps.app.send(sub.conversationId, activity);
+
+        // Advance the "since last brief" watermark AFTER a successful delivery,
+        // so the next run reports only what changed since this one.
+        subscriptions.setLastRun(sub.id, new Date().toISOString());
 
         console.log(
             JSON.stringify({

@@ -105,7 +105,9 @@ test("a missing/expired token asks the user to sign in again, and runs nothing",
 test("only known schedules are accepted, and they map to cron expressions", () => {
     assert.strictEqual(digest.isValidSchedule("daily"), true);
     assert.strictEqual(digest.isValidSchedule("hourly"), true);
-    assert.strictEqual(digest.isValidSchedule("weekly"), false);
+    assert.strictEqual(digest.isValidSchedule("weekly"), true); // Part C: proactive Monday brief
+    assert.strictEqual(digest.cronFor("weekly"), "0 8 * * 1");
+    assert.strictEqual(digest.isValidSchedule("nonsense"), false);
     assert.strictEqual(digest.cronFor("daily"), "0 8 * * *");
 });
 

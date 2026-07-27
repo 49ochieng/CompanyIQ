@@ -64,6 +64,23 @@ const config = {
   // LOCAL ONLY: use the developer's own az-login identity for Fabric when there
   // is no Teams SSO (playground/harness). Hard-disabled when running on Azure.
   fabricLocalDevIdentity: (process.env.FABRIC_LOCAL_DEV_IDENTITY || "").toLowerCase() === "true",
+
+  // Part C: public web intelligence.
+  // WEB_GROUNDING: JSON {name, description, projectEndpoint, connectionId, model,
+  //   freshness?, count?, market?, userScoped}. The lean Grounding-with-Bing
+  //   path — inline responses call, no persistent agent. userScoped MUST be set.
+  webGrounding: process.env.WEB_GROUNDING,
+  // WATCHLIST: JSON [{name, domains[], description, topics[], cadence}].
+  watchlist: process.env.WATCHLIST,
+  // Dedicated AI Search indexes for crawled web content and dated snapshots
+  // (kept separate from the document RAG index).
+  webIndexName: process.env.AZURE_SEARCH_WEB_INDEX_NAME || "companyiq-web",
+  webSnapshotIndexName: process.env.AZURE_SEARCH_WEB_SNAPSHOT_INDEX_NAME || "companyiq-web-snapshots",
+  // Crawler politeness / bounds.
+  crawlMaxPages: parseInt(process.env.CRAWL_MAX_PAGES || "40", 10),
+  crawlMaxDepth: parseInt(process.env.CRAWL_MAX_DEPTH || "2", 10),
+  crawlDelayMs: parseInt(process.env.CRAWL_DELAY_MS || "1000", 10),
+  crawlCacheTtlMs: parseInt(process.env.CRAWL_CACHE_TTL_MS || String(6 * 60 * 60 * 1000), 10),
 };
 
 module.exports = config;

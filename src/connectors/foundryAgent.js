@@ -14,6 +14,7 @@ const config = require("../config");
 const { getAzureCredential } = require("../auth/azureCredential");
 const { getCircuit, unavailableResult } = require("./circuit");
 const { buildPayload, wrapUntrusted } = require("./payload");
+const { assertUserScoped } = require("./validate");
 const { isAccessDenied } = require("./mcpClient");
 const { AUTH_REQUIRED } = require("../auth/graph");
 
@@ -62,6 +63,26 @@ function extractOutputText(data) {
         }
     }
     return parts.join("\n");
+}
+
+// Preserve the agent's own web/knowledge citations (url_citation annotations on
+// the Responses output) so agent web results carry sources and dates we can
+// render — mirroring the httpAgent `citations[]` shape. De-duplicated by URL.
+function extractCitations(data) {
+    const citations = [];
+    const seen = new Set();
+    for (const item of data.output || []) {
+        if (item.type !== "message") continue;
+        for (const c of item.content || []) {
+            for (const a of c.annotations || []) {
+                if (a.type === "url_citation" && a.url && !seen.has(a.url)) {
+                    seen.add(a.url);
+                    citations.push({ title: String(a.title || a.url).slice(0, 120), url: a.url });
+                }
+            }
+        }
+    }
+    return citations;
 }
 
 function buildAgentTool(agent) {
@@ -134,7 +155,8 @@ function buildAgentTool(agent) {
                     const detail = await res.text().catch(() => "");
                     throw new Error(`Foundry responses call failed: ${res.status} ${detail.slice(0, 200)}`);
                 }
-                return { text: extractOutputText(await res.json()) };
+                const data = await res.json();
+                return { text: extractOutputText(data), citations: extractCitations(data) };
             }).catch((error) => {
                 if (userIdentity && isAccessDenied(error)) {
                     return { accessDenied: true };
@@ -151,7 +173,10 @@ function buildAgentTool(agent) {
                         "model working — relay it to the user; never retry with a different identity.",
                 };
             }
-            return wrapUntrusted(`agent:${agent.name}`, outcome.text);
+            return wrapUntrusted(`agent:${agent.name}`, outcome.text, {
+                userScoped: agent.userScoped,
+                citations: outcome.citations && outcome.citations.length ? outcome.citations : undefined,
+            });
         },
     };
 }
@@ -159,9 +184,10 @@ function buildAgentTool(agent) {
 function loadFoundryAgents(registerTool) {
     const agents = parseAgents(config.foundryAgents);
     for (const agent of agents) {
+        assertUserScoped(agent, "Foundry agent");
         registerTool(buildAgentTool(agent));
     }
     return agents.map((a) => a.name);
 }
 
-module.exports = { loadFoundryAgents, buildAgentTool, parseAgents, extractOutputText };
+module.exports = { loadFoundryAgents, buildAgentTool, parseAgents, extractOutputText, extractCitations };

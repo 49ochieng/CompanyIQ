@@ -42,7 +42,9 @@ function filterProvenance(query, userText) {
 module.exports = {
     name: "queryCompanyData",
     description:
-        "Query the organization's structured data. Choose the `source` that holds the data the question is " +
+        "Query the organization's structured data — the ONLY source of product, item, supplier, ingredient, " +
+        "country-of-origin, and count/breakdown facts (never answer those from documents, the web, or your own " +
+        "knowledge). Choose the `source` that holds the data the question is " +
         "about (the available sources, their tables and columns are listed in your instructions), then build a " +
         "structured query against THAT source's schema. Build it fresh from the user's current question — never " +
         "reuse filters from earlier turns unless the user refers back to them. One query may only use tables from " +

@@ -51,7 +51,8 @@ module.exports = {
     name: "searchDocuments",
     description:
         "Search the company's internal document library (policies, benefit plans, programs, company overviews). " +
-        "Use for questions answered by internal documents rather than structured product data.",
+        "Use for prose/policy questions answered by internal documents. NOT for product/item/supplier facts " +
+        "(use queryCompanyData) and NOT for the user's own files or email (use searchOneDrive / searchEmail).",
     parameters: {
         type: "object",
         properties: {

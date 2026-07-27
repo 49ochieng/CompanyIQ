@@ -1,5 +1,5 @@
 const { ChatPrompt } = require("@microsoft/teams.ai");
-const { OpenAIChatModel } = require("@microsoft/teams.openai");
+const { ParallelOpenAIChatModel } = require("./parallelModel");
 const fs = require("fs");
 const path = require("path");
 const config = require("../config");
@@ -93,7 +93,7 @@ async function runTurn({ text, messages, conversationId, context = {}, allowedTo
     const prompt = new ChatPrompt({
         messages,
         instructions: buildInstructions(context),
-        model: new OpenAIChatModel({
+        model: new ParallelOpenAIChatModel({
             model: config.azureOpenAIDeploymentName,
             // Entra (managed identity) auth when no key is configured.
             ...(config.azureOpenAIKey
@@ -123,6 +123,9 @@ async function runTurn({ text, messages, conversationId, context = {}, allowedTo
                     ok: !rejected,
                     error: rejected ? result.error : undefined,
                     connectionName: rejected ? result.connectionName : undefined,
+                    // Compact, non-sensitive description of what the call returned,
+                    // for /trace. Never includes row contents or tokens.
+                    summary: summarizeResult(result),
                     durationMs: Date.now() - startedAt,
                 });
                 logToolCall(conversationId, tool.name, args, result, Date.now() - startedAt);
@@ -133,6 +136,7 @@ async function runTurn({ text, messages, conversationId, context = {}, allowedTo
                     args,
                     ok: false,
                     error: error.message,
+                    summary: `threw: ${String(error.message).slice(0, 80)}`,
                     durationMs: Date.now() - startedAt,
                 });
                 logToolCall(conversationId, tool.name, args, { error: error.message }, Date.now() - startedAt);
@@ -207,7 +211,56 @@ async function runTurn({ text, messages, conversationId, context = {}, allowedTo
         })
     );
 
-    return { content, toolCalls, toolResults, authRequired, authRequiredConnection, proposals, directActions };
+    // Per-turn trace for the /trace command: ordered calls with latency and a
+    // compact result summary each. Kept small and free of row contents/tokens.
+    const trace = {
+        conversationId,
+        input: text,
+        at: new Date(turnStartedAt).toISOString(),
+        latencyMs: Date.now() - turnStartedAt,
+        af1: content === AF1_MESSAGE,
+        authRequired,
+        calls: toolCalls.map((c, i) => ({
+            step: i + 1,
+            tool: c.tool,
+            ok: c.ok,
+            error: c.error,
+            summary: c.summary,
+            durationMs: c.durationMs,
+        })),
+    };
+
+    return { content, toolCalls, toolResults, authRequired, authRequiredConnection, proposals, directActions, trace };
+}
+
+// Compact, non-sensitive one-liner describing a tool result, for /trace and
+// audit. Deliberately never includes row values, document text, or tokens.
+function summarizeResult(result) {
+    if (!result || typeof result !== "object") {
+        return "ok";
+    }
+    if (result.error) {
+        return `error: ${result.error}`;
+    }
+    if (typeof result.rowCount === "number") {
+        return `${result.rowCount} row${result.rowCount === 1 ? "" : "s"}${result.truncated ? " (truncated)" : ""}`;
+    }
+    if (Array.isArray(result.documents)) {
+        return `${result.documents.length} document${result.documents.length === 1 ? "" : "s"}`;
+    }
+    if (Array.isArray(result.results)) {
+        return `${result.results.length} web result${result.results.length === 1 ? "" : "s"}`;
+    }
+    if (result.external && result.source) {
+        return `external result from ${result.source}`;
+    }
+    if (result.proposed) {
+        return "action proposed (awaiting confirmation)";
+    }
+    if (result.queued) {
+        return "action queued";
+    }
+    return "ok";
 }
 
 function logToolCall(conversationId, tool, args, result, durationMs) {

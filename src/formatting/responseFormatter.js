@@ -25,6 +25,7 @@ function resolveColumns(data) {
  */
 function formatResponse(turnResult) {
     const { content, toolResults } = turnResult;
+    const toolCalls = turnResult.toolCalls || [];
 
     // UC-01 Appendix A-02: external web content renders in a clearly
     // separated, labeled section after internal results, with source URLs.
@@ -45,13 +46,29 @@ function formatResponse(turnResult) {
         if (!result.raw) {
             continue;
         }
-        text += `\n\n---\n**External result — ${result.source} (not company data):**\n${truncate(result.raw, 1500)}`;
+        // Disclosure (NOT a control): a connector explicitly classified
+        // userScoped:false may return data beyond the caller's own access
+        // (e.g. a knowledge base reached with a shared key). Say so, every time.
+        const scopeWarning =
+            result.userScoped === false
+                ? "\n> ⚠️ **This may include information beyond your own access** — it was not filtered by your permissions. Verify before relying on or sharing it."
+                : "";
+        text += `\n\n---\n**External result — ${result.source} (not company data):**${scopeWarning}\n${truncate(result.raw, 1500)}`;
         if (Array.isArray(result.citations) && result.citations.length > 0) {
             const cites = result.citations
                 .map((c) => (typeof c === "string" ? `- ${c}` : `- [${c.title || c.url}](${c.url})`))
                 .join("\n");
             text += `\nSources:\n${cites}`;
         }
+    }
+
+    // Deterministic provenance footer: the exact set of sources that actually
+    // produced this answer, built from the recorded tool calls — not from the
+    // model, so it cannot be omitted, reworded, or invented. Complements the
+    // model's inline "According to …" attribution with a guaranteed source list.
+    const footer = attributionFooter(toolCalls);
+    if (footer) {
+        text += `\n\n${footer}`;
     }
 
     const activity = new MessageActivity(text).addAiGenerated();
@@ -216,6 +233,47 @@ function buildTableCard(data) {
     };
 }
 
+// Human-readable source label for a tool name (including dynamic connector
+// tools, whose names encode the connector and instance).
+function sourceLabelFor(toolName) {
+    const STATIC = {
+        queryCompanyData: "Company database",
+        searchDocuments: "Document library",
+        searchSharePoint: "SharePoint",
+        searchOneDrive: "OneDrive",
+        searchEmail: "Email",
+        getCalendar: "Calendar",
+        getPlannerTasks: "Planner",
+        findPeople: "Directory",
+        webSearch: "Public web",
+    };
+    if (STATIC[toolName]) return STATIC[toolName];
+    let m;
+    if ((m = toolName.match(/^ask_fabric_(.+)$/))) return `Fabric data agent: ${m[1]}`;
+    if ((m = toolName.match(/^ask_agent_(.+)$/))) return `Agent: ${m[1]}`;
+    if ((m = toolName.match(/^mcp_([^_]+)_/))) return `External service: ${m[1]}`;
+    return toolName;
+}
+
+/**
+ * Build the "_Sources this turn: …_" line from the calls that actually
+ * succeeded, in first-seen order, de-duplicated. Returns "" when no tool
+ * produced data (pure conversational replies get no footer).
+ */
+function attributionFooter(toolCalls) {
+    const seen = new Set();
+    const labels = [];
+    for (const call of toolCalls) {
+        if (!call || !call.ok) continue;
+        const label = sourceLabelFor(call.tool);
+        if (seen.has(label)) continue;
+        seen.add(label);
+        labels.push(label);
+    }
+    if (labels.length === 0) return "";
+    return `_Sources this turn: ${labels.join(", ")}._`;
+}
+
 function truncate(text, max) {
     if (typeof text !== "string" || text.length <= max) {
         return text;
@@ -223,4 +281,4 @@ function truncate(text, max) {
     return `${text.slice(0, max - 1)}…`;
 }
 
-module.exports = { formatResponse };
+module.exports = { formatResponse, attributionFooter, sourceLabelFor };

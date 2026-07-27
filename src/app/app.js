@@ -13,9 +13,14 @@ const { executeApproved, cancelApproved } = require("../actions/runner");
 const subscriptions = require("../scheduler/subscriptions");
 const digest = require("../scheduler/digest");
 const dataSources = require("../data/sources");
+const { renderTrace } = require("../formatting/trace");
 
 // Last successful query time per source, for /sources.
 const lastQueryAt = new Map();
+
+// Last turn's execution trace per conversation, for /trace. Bounded to the most
+// recent turn per conversation (overwritten each turn), so it can't grow.
+const lastTrace = new Map();
 
 // Conversation references keyed by AAD object ID, so the bot can message a
 // user proactively (self-messages, scheduled digests). Populated on every
@@ -241,6 +246,12 @@ async function processTurn(send, conversationKey, text, userContext, allowedTool
     actionsEnabled: options.actionsEnabled === true,
   });
 
+  // Record the execution trace for /trace (even on auth-required turns — seeing
+  // the tool that demanded sign-in is exactly what the user wants to inspect).
+  if (turnResult.trace) {
+    lastTrace.set(conversationKey, turnResult.trace);
+  }
+
   if (turnResult.authRequired) {
     return turnResult;
   }
@@ -408,6 +419,10 @@ app.on('message', async ({ send, activity, signin, signout, isSignedIn, userToke
           lines.push(`    - ${health}${last ? ` · last query ${last}` : ''}`);
         }
         await send(lines.join('\n'));
+        return;
+      }
+      if (outcome.action === 'trace') {
+        await send(renderTrace(lastTrace.get(conversationKey)));
         return;
       }
       if (outcome.action === 'unsubscribe') {

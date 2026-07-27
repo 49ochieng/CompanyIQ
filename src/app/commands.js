@@ -14,8 +14,10 @@ const HELP_TEXT = [
     "- `/calendar [today|week]` — your upcoming meetings",
     "- `/sources` — data sources, how each is scoped, and whether they're reachable",
     "- `/agents` — configured external agents/MCP servers and their status",
+    "- `/trace` — what my last answer actually did: tools called, in order, with timings",
     "- `/web <query>` — search the public web (when enabled)",
-    "- `/subscribe daily <question>` — get the answer delivered on a schedule (`daily`, `hourly`, `test`)",
+    "- `/subscribe daily <question>` — get the answer delivered on a schedule (`daily`, `weekly`, `hourly`, `test`)",
+    "- `/subscribe weekly <org> brief` — proactive Monday brief on a watched org (e.g. `/subscribe weekly dallas county brief`)",
     "- `/unsubscribe` — stop all your scheduled digests",
     "- `/signin` — sign in (you can also just type `sign in`)",
     "- `/signout` — sign out, so you can test the sign-in flow again",
@@ -115,6 +117,9 @@ function buildCommandOutcome(parsed, deps) {
 
         case "sources":
             return { action: "sources" };
+
+        case "trace":
+            return { action: "trace" };
 
         case "agents": {
             const connectors = deps.connectorStatus();

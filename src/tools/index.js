@@ -13,6 +13,8 @@ const getCalendar = require("./getCalendar");
 const getPlannerTasks = require("./getPlannerTasks");
 const findPeople = require("./findPeople");
 const webSearch = require("./webSearch");
+const watchlistSearch = require("./watchlistSearch");
+const watchlistBrief = require("./watchlistBrief");
 
 const tools = [
     queryCompanyData,
@@ -29,6 +31,12 @@ const tools = [
 // never registered and the model never sees it.
 if (config.publicWebEnabled) {
     tools.push(webSearch);
+}
+
+// Watchlist tools register only when at least one entity is configured, so a
+// deployment without WATCHLIST never exposes them.
+if (config.watchlist && config.watchlist.trim() && config.watchlist.trim() !== "[]") {
+    tools.push(watchlistSearch, watchlistBrief);
 }
 
 function validateTool(tool) {

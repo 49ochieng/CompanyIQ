@@ -1,7 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert");
 const { buildAgentTool, parseAgents, endpointFor, argumentsFor } = require("./fabricAgent");
-const { buildAgentTool: buildFoundryTool } = require("./foundryAgent");
+const { buildAgentTool: buildFoundryTool, extractCitations } = require("./foundryAgent");
 
 const AGENT = {
     name: "sales",
@@ -153,6 +153,39 @@ test("user-identity Foundry agent without a token → auth_required for 'foundry
     } finally {
         global.fetch = originalFetch;
     }
+});
+
+test("Foundry web/knowledge url_citation annotations are preserved as citations", () => {
+    // Shape observed from a real Responses call: citations live on
+    // output[].content[].annotations, not on a top-level field.
+    const data = {
+        output: [
+            { type: "web_search_call" },
+            {
+                type: "message",
+                content: [
+                    {
+                        type: "output_text",
+                        text: "Dallas County announced ...",
+                        annotations: [
+                            { type: "url_citation", url: "https://www.dallascounty.org/a.pdf", title: "July 6, 2026 press release" },
+                            { type: "url_citation", url: "https://www.dallascounty.org/a.pdf", title: "dup" }, // de-duped by URL
+                            { type: "url_citation", url: "https://www.dallascounty.org/press/" },
+                        ],
+                    },
+                ],
+            },
+        ],
+    };
+    const cites = extractCitations(data);
+    assert.strictEqual(cites.length, 2);
+    assert.deepStrictEqual(cites[0], { title: "July 6, 2026 press release", url: "https://www.dallascounty.org/a.pdf" });
+    assert.strictEqual(cites[1].url, "https://www.dallascounty.org/press/");
+});
+
+test("no annotations → no citations", () => {
+    assert.deepStrictEqual(extractCitations({ output: [{ type: "message", content: [{ type: "output_text", text: "hi" }] }] }), []);
+    assert.deepStrictEqual(extractCitations({}), []);
 });
 
 test("app-identity Foundry agents are unchanged (no getAudienceToken needed)", async () => {

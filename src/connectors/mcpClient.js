@@ -8,6 +8,7 @@ const { StreamableHTTPClientTransport } = require("@modelcontextprotocol/sdk/cli
 const config = require("../config");
 const { getCircuit, unavailableResult } = require("./circuit");
 const { buildPayload, wrapUntrusted } = require("./payload");
+const { assertUserScoped } = require("./validate");
 const { AUTH_REQUIRED } = require("../auth/graph");
 
 const NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -144,7 +145,9 @@ function buildToolDefinition(server, mcpTool, existingNames) {
                             "Relay this to the user; do not retry or use another tool for it.",
                     };
                 }
-                return wrapUntrusted(`mcp:${server.name}/${mcpTool.name}`, outcome.text);
+                return wrapUntrusted(`mcp:${server.name}/${mcpTool.name}`, outcome.text, {
+                    userScoped: server.userScoped,
+                });
             },
         },
     };
@@ -162,6 +165,10 @@ function textFromContent(content) {
 async function loadMcpTools(registerTool, existingNames) {
     const servers = parseServers(config.mcpServers);
     for (const server of servers) {
+        // Fail-fast BEFORE any network call: an unclassified server must not
+        // load. Thrown here so a misconfigured MCP_SERVERS crashes startup
+        // rather than silently registering tools of unknown scope.
+        assertUserScoped(server, "MCP server");
         try {
             const listed = await withClient(server, (client) => client.listTools());
             const candidates = filterTools(listed.tools || [], server.allowedTools);

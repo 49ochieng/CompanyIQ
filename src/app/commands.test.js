@@ -120,6 +120,10 @@ test("turn instructions carry the signed-in identity for name questions", () => 
     assert.ok(signedOut.includes(AF1_MESSAGE));
 });
 
+test("/trace routes to the trace action", () => {
+    assert.deepStrictEqual(buildCommandOutcome({ command: "trace", args: "" }, DEPS), { action: "trace" });
+});
+
 test("/agents lists connector circuit status", () => {
     const outcome = buildCommandOutcome(
         { command: "agents", args: "" },

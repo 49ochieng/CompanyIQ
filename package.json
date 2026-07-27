@@ -25,7 +25,8 @@
         "db:introspect": "env-cmd --silent -f env/.env.playground.user node ./src/data/schema-introspect.js",
         "db:seed": "env-cmd --silent -f env/.env.playground.user node ./src/data/seed.js",
         "test": "node --test \"src/**/*.test.js\"",
-        "fabric:introspect": "env-cmd --silent -f env/.env.local.user node ./src/data/fabric-introspect.js"
+        "fabric:introspect": "env-cmd --silent -f env/.env.local.user node ./src/data/fabric-introspect.js",
+        "web:index": "env-cmd --silent -f env/.env.local.user node ./src/web/indexCli.js"
     },
     "repository": {
         "type": "git",

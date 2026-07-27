@@ -124,6 +124,26 @@ The bot holds one OAuth connection per downstream audience — `graph` (default)
 - **Hard rule (tested)**: user-identity tools never fall back to the app credential. A 401/403 surfaces as a clean "you don't have access" message — that is the permission model working, not an error — and the model is instructed to relay it without retrying or answering from another source.
 - All delegation results remain untrusted data (delimited markers, labeled sections, injection-tested).
 
+### `userScoped` — every connector must classify itself
+
+Each external connector entry (Foundry / HTTP / MCP / Fabric) **must** declare `"userScoped": true|false`. There is no default: an entry without an explicit boolean **fails at startup** (`src/connectors/validate.js`), because silently guessing is how one user ends up seeing another's data.
+
+- `userScoped: true` — the caller's identity propagates all the way to the underlying data, so results are limited to what the signed-in user is allowed to see (a 401/403 is the permission model working). Required for the delegation guarantee to hold.
+- `userScoped: false` — results **may include data beyond the caller's own access** (e.g. an agent that grounds on a knowledge base reached with a shared key, where the search service has no caller principal to trim against). The formatter labels every such result: *"⚠️ This may include information beyond your own access."*
+
+**A label is disclosure, not a control.** Marking a connector `userScoped: false` does not make it safe — it only warns the user after the fact. Registering a non-user-scoped connector is a **deliberate exception to CompanyIQ's core guarantee that no path returns data the user can't see**, and must carry a written reason (why the broader exposure is acceptable for that specific source), recorded here or in the connector config review. Prefer fixing the propagation (an on-behalf-of / Entra path) over registering an exception. When a specific connector is found to be non-user-scoped, record the finding and remediation privately with the resource owner — internal security findings are not committed to this public repo.
+
+## Parallel tool calls — SDK coupling ⚠️
+
+`src/orchestrator/parallelModel.js` (`ParallelOpenAIChatModel`) subclasses the SDK's `OpenAIChatModel` and reimplements the batched-tool-call round so that **independent** calls the model emits in one turn run concurrently (`Promise.all`) instead of sequentially. Multi-hop chaining (call A → see result → call B) is unaffected — that already works via the SDK's own recursion.
+
+**This overrides `send()` and mirrors the SDK's internal message-mapping and follow-up-completion logic. It is coupled to `@microsoft/teams.openai` internals.** On every `@microsoft/teams.*` upgrade, re-verify against the installed `node_modules/@microsoft/teams.openai/dist/chat.mjs`:
+- the `send(input, options)` shape and the `{ system, messages, functions, request, onChunk, autoFunctionCalling }` options,
+- the model→assistant / function→tool message mapping,
+- the auto-function-calling recursion.
+
+`src/orchestrator/parallelModel.test.js` locks the observable behavior (concurrency, single-call delegation, multi-hop chaining, resilient batch on a throwing call). If those tests fail after a bump, the override — not the test — is what needs updating. 0/1-call rounds and any streaming path delegate to `super`, so a mismatch degrades to the SDK's own behavior rather than breaking outright.
+
 ## Local vs deployed
 
 | | Local / Playground | Azure (dev) |
