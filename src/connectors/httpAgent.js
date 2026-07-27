@@ -1,13 +1,26 @@
 // Generic self-hosted agent connector — the contract Mela AI or other Armely
 // workers can implement: POST {task, context?} with a bearer token, respond
 // {result, citations?}. Config: HTTP_AGENTS env JSON —
-// [{name, description, url, tokenEnv, allowedContext?}]
-// tokenEnv names the environment variable holding the bearer token, so tokens
-// stay out of the (non-secret) connector config.
+// [{name, description, url, tokenEnv?, oboConnection?, allowedContext?, userScoped}]
+//
+// Two mutually exclusive auth modes:
+//   - tokenEnv: a STATIC app-level bearer token from an env var. The same
+//     token for every caller — appropriate only for genuinely org-wide
+//     services with no per-user access difference. userScoped:false.
+//   - oboConnection: the NAME of one of the bot's own OAuth connections
+//     (e.g. "graph", "fabric") — NOT an arbitrary audience string. The
+//     caller's own delegated token for that connection's audience is
+//     forwarded, so a service we own can validate it and enforce the
+//     caller's actual access. This only provides a real guarantee if the
+//     receiving service verifies the token (signature/issuer/audience) and
+//     authorizes on its claims — forwarding it alone is not a control.
+//     userScoped:true is only honest once that's confirmed, same bar as
+//     every other connector.
 const config = require("../config");
 const { getCircuit, unavailableResult } = require("./circuit");
 const { buildPayload, wrapUntrusted } = require("./payload");
 const { assertUserScoped } = require("./validate");
+const { AUTH_REQUIRED } = require("../auth/graph");
 
 const NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const MAX_DESCRIPTION = 500;
@@ -25,6 +38,12 @@ function parseAgents(raw) {
     return agents.filter((a) => {
         if (!a || !NAME_RE.test(a.name || "") || !a.url) {
             console.error(`HTTP agent entry skipped (invalid): ${JSON.stringify(a?.name)}`);
+            return false;
+        }
+        if (a.tokenEnv && a.oboConnection) {
+            console.error(
+                `HTTP agent entry skipped (invalid): '${a.name}' sets both tokenEnv and oboConnection — pick one auth mode.`
+            );
             return false;
         }
         return true;
@@ -54,8 +73,20 @@ function buildAgentTool(agent) {
                 return unavailableResult(`http:${agent.name}`, circuit.status().retryInMs);
             }
 
+            let token;
+            if (agent.oboConnection) {
+                token =
+                    context && context.getAudienceToken
+                        ? await context.getAudienceToken(agent.oboConnection)
+                        : undefined;
+                if (!token) {
+                    return { ...AUTH_REQUIRED, connectionName: agent.oboConnection };
+                }
+            } else if (agent.tokenEnv) {
+                token = process.env[agent.tokenEnv];
+            }
+
             const payload = buildPayload(args.task, context, agent.allowedContext);
-            const token = agent.tokenEnv ? process.env[agent.tokenEnv] : undefined;
 
             const body = await circuit.exec(agent.name, async (signal) => {
                 const res = await fetch(agent.url, {
