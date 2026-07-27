@@ -1,4 +1,5 @@
 const { ChatPrompt } = require("@microsoft/teams.ai");
+const { OpenAIChatModel } = require("@microsoft/teams.openai");
 const { ParallelOpenAIChatModel } = require("./parallelModel");
 const fs = require("fs");
 const path = require("path");
@@ -65,6 +66,15 @@ function buildInstructions(context) {
 }
 
 /**
+ * Kill switch: PARALLEL_TOOL_CALLS_ENABLED=false falls back to the stock SDK
+ * model (sequential tool-call rounds) without a deploy. The parallel fan-out
+ * subclasses SDK internals and has never run against a real connector.
+ */
+function selectModelClass() {
+    return config.parallelToolCallsEnabled ? ParallelOpenAIChatModel : OpenAIChatModel;
+}
+
+/**
  * Run one conversation turn through the LLM with function calling.
  *
  * ChatPrompt wraps `messages` in a LocalMemory that shares the array, so the
@@ -90,18 +100,19 @@ async function runTurn({ text, messages, conversationId, context = {}, allowedTo
     // Last result per tool name; the formatter uses these to render cards/citations.
     const toolResults = {};
 
+    const modelOptions = {
+        model: config.azureOpenAIDeploymentName,
+        // Entra (managed identity) auth when no key is configured.
+        ...(config.azureOpenAIKey
+            ? { apiKey: config.azureOpenAIKey }
+            : { azureADTokenProvider: getOpenAITokenProvider() }),
+        endpoint: config.azureOpenAIEndpoint,
+        apiVersion: config.azureOpenAIApiVersion,
+    };
     const prompt = new ChatPrompt({
         messages,
         instructions: buildInstructions(context),
-        model: new ParallelOpenAIChatModel({
-            model: config.azureOpenAIDeploymentName,
-            // Entra (managed identity) auth when no key is configured.
-            ...(config.azureOpenAIKey
-                ? { apiKey: config.azureOpenAIKey }
-                : { azureADTokenProvider: getOpenAITokenProvider() }),
-            endpoint: config.azureOpenAIEndpoint,
-            apiVersion: config.azureOpenAIApiVersion,
-        }),
+        model: new (selectModelClass())(modelOptions),
     });
 
     const available = allowedTools
@@ -278,4 +289,4 @@ function logToolCall(conversationId, tool, args, result, durationMs) {
     );
 }
 
-module.exports = { runTurn, buildInstructions, AF1_MESSAGE };
+module.exports = { runTurn, buildInstructions, AF1_MESSAGE, selectModelClass };

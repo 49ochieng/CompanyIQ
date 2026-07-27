@@ -40,6 +40,7 @@ param httpAgents string = '[]'
 param fabricDataAgents string = '[]'
 param fabricSqlEndpoint string = ''
 param fabricDatabase string = ''
+param parallelToolCallsEnabled string = 'true'
 
 param webAppSKU string
 
@@ -241,6 +242,10 @@ resource webApp 'Microsoft.Web/sites@2021-02-01' = {
         {
           name: 'DB_KEEPALIVE'
           value: 'true' // keep the serverless database resumed
+        }
+        {
+          name: 'PARALLEL_TOOL_CALLS_ENABLED'
+          value: parallelToolCallsEnabled
         }
       ]
       ftpsState: 'FtpsOnly'

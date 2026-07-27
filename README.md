@@ -65,6 +65,7 @@ Hard rules:
 | `FABRIC_LOCAL_DEV_IDENTITY` | **Local only.** Use the developer's own `az login` identity for Fabric when there is no Teams SSO (playground/harness). **Hard-disabled on Azure** — otherwise `DefaultAzureCredential` would return the managed identity and silently turn this into an app-identity source. | env file | never set |
 | `FABRIC_TENANT_ID` / `FABRIC_CLIENT_ID` / `FABRIC_CLIENT_SECRET` | **Not used at runtime.** The Fabric source authenticates as the signed-in user; no service principal is involved. Kept only for reference/tools. | env file | — |
 | `GRAPH_SCOPES` | delegated scope list (must match the OAuth connection) | env file | — |
+| `PARALLEL_TOOL_CALLS_ENABLED` | kill switch for the A2 parallel tool-call fan-out (`ParallelOpenAIChatModel`); default **on**; set to `false` to fall back to the stock SDK's sequential model without a deploy | env file | app setting |
 | `KEY_VAULT_URI` | enables startup secret resolution | — | Bicep output |
 | `CLIENT_ID` / `CLIENT_SECRET` / `TENANT_ID` / `BOT_TYPE` | bot identity | `.localConfigs` (generated) | Bicep (managed identity) |
 

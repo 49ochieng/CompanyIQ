@@ -37,6 +37,11 @@ const config = {
   sharePointSites: process.env.SHAREPOINT_SITES,
   // Phase 4: public web tool (never registered when the flag is off).
   publicWebEnabled: (process.env.CONNECTOR_PUBLIC_WEB_ENABLED || "").toLowerCase() === "true",
+  // Phase 12 kill switch: A2 parallel tool-call fan-out subclasses SDK internals
+  // and has never run against a real connector. Default ON (current behavior);
+  // set to "false" to fall back to the stock SDK's sequential tool-call model
+  // without a deploy.
+  parallelToolCallsEnabled: (process.env.PARALLEL_TOOL_CALLS_ENABLED || "true").toLowerCase() !== "false",
   orgWebsiteAllowlist: process.env.ORG_WEBSITE_ALLOWLIST,
   // Phase 5: external agent / MCP connectors (JSON arrays; see src/connectors).
   mcpServers: process.env.MCP_SERVERS,

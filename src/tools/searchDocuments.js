@@ -47,6 +47,11 @@ function getSearchClient() {
     return searchClient;
 }
 
+// Exposed so tests can override the SDK boundary the same way db.getPool is
+// overridden elsewhere — call sites below go through `deps.*`, not the bare
+// functions, so a test reassigning a property here takes effect.
+const deps = { getEmbeddingVector, getSearchClient };
+
 module.exports = {
     name: "searchDocuments",
     description:
@@ -75,8 +80,8 @@ module.exports = {
             return { documents: [] };
         }
 
-        const queryVector = await getEmbeddingVector(query);
-        const searchResults = await getSearchClient().search(query, {
+        const queryVector = await deps.getEmbeddingVector(query);
+        const searchResults = await deps.getSearchClient().search(query, {
             searchFields: ["docTitle", "description"],
             select: ["docId", "docTitle", "description"],
             vectorSearchOptions: {
@@ -102,4 +107,5 @@ module.exports = {
 
         return { documents };
     },
+    _deps: deps,
 };
