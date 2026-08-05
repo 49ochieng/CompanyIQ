@@ -4,40 +4,42 @@
 // Either directConnectUrl, OR both environmentId and schemaName, are required
 // (directConnectUrl wins if both are given — same precedence the SDK uses).
 //
-// Verified against the installed @microsoft/agents-copilotstudio-client
-// source (node_modules/@microsoft/agents-copilotstudio-client/src), not just
-// docs, 2026-07-27:
-//   - `new CopilotStudioClient(settings, token)` takes a plain bearer token —
-//     no MSAL dependency needed. We supply OUR OWN token via the bot's
-//     'copilotstudio' OAuth connection (context.getAudienceToken), the same
-//     identity-propagating pattern as fabric/foundry. Direct Line (the
-//     app-only alternative) was deliberately rejected in the design writeup
-//     because it does not propagate the caller's identity — this connector
-//     exists specifically to preserve that guarantee, so there is no
-//     app-identity mode here.
-//   - The token audience for Prod cloud (our tenant) is
-//     https://api.powerplatform.com/.default — confirmed two ways: reading
-//     powerPlatformEnvironment.ts's getEndpointSuffix()/getTokenAudience(),
-//     and an independent live check (`az account get-access-token --resource
-//     https://api.powerplatform.com`, decoded `aud` claim matched exactly).
-//   - The protocol is conversation-based over Server-Sent Events
-//     (eventsource-client), not a single POST/response like Foundry. Each
-//     call here starts a fresh conversation (stateless per delegation,
-//     matching every other connector's "self-contained task" contract) then
-//     sends one activity — two round trips, not one.
-//
-// KNOWN LIMITATION (read before trusting an access_denied classification):
-// eventsource-client's onFetchResponse (node_modules/eventsource-client/src/
-// client.ts) only special-cases HTTP 204; it does NOT check response.ok, so
-// a 401/403 response body is handed to the SSE parser as if it were a valid
-// stream instead of surfacing as a clean thrown error the way Foundry/Fabric
-// give us. In practice this likely means an access-denied call comes back as
-// zero yielded activities, indistinguishable from some other "nothing to
-// say" case, NOT a clean access_denied result. Do not assume the two are
-// distinguishable until an empirical two-account test proves otherwise
-// (same bar as the AWA/Fabric checks) — this is called out for that test.
-const { CopilotStudioClient } = require("@microsoft/agents-copilotstudio-client");
+// DELIBERATELY BYPASSES the high-level CopilotStudioClient class from
+// @microsoft/agents-copilotstudio-client and talks to the SSE endpoint
+// directly, using only the package's exported low-level helpers
+// (getCopilotStudioConnectionUrl, ExecuteTurnRequest, UserAgentHelper) plus
+// Activity/ActivityTypes from @microsoft/agents-activity and eventsource-
+// parser's createParser (a real, already-resolved transitive dependency,
+// added here as our own direct one). Reasons, found by reading the
+// installed source, not docs (2026-07-27):
+//   1. ACCESS-DENIED DETECTION: CopilotStudioClient's internal transport
+//      (eventsource-client) never checks response.ok — a 401/403 body gets
+//      handed to the SSE parser as if it were a valid stream. Our own
+//      request function below checks res.ok BEFORE touching the body, so a
+//      401/403 throws with `.status` set and is translated to a clean
+//      access_denied result, same contract as foundryAgent.js/fabricAgent.js.
+//   2. RUNAWAY RETRY: worse than just "can't detect the status" — when the
+//      response body stream ends without a recognized SSE 'end' event (which
+//      is what a non-SSE error body produces), eventsource-client's read
+//      loop (node_modules/eventsource-client/src/client.ts, the `do { ...
+//      scheduleReconnect() ... } while (open)` block) treats it as a DROPPED
+//      connection and automatically reconnects — it does not error, it
+//      retries. For a single stateless tool call that's the wrong behavior
+//      regardless of the detection question: we want one request, one
+//      answer, no open-ended reconnect loop hidden inside a `handler()`
+//      call. Talking to the endpoint directly avoids that entirely — no
+//      reconnect logic exists here.
+// Token audience confirmed two ways: reading getEndpointSuffix()/
+// getTokenAudience() in the installed powerPlatformEnvironment.ts, and an
+// independent live check (`az account get-access-token --resource
+// https://api.powerplatform.com`, decoded `aud` claim matched exactly).
+const {
+    getCopilotStudioConnectionUrl,
+    ExecuteTurnRequest,
+    UserAgentHelper,
+} = require("@microsoft/agents-copilotstudio-client");
 const { Activity, ActivityTypes } = require("@microsoft/agents-activity");
+const { createParser } = require("eventsource-parser");
 const config = require("../config");
 const { getCircuit, unavailableResult } = require("./circuit");
 const { buildPayload, wrapUntrusted } = require("./payload");
@@ -78,6 +80,59 @@ function extractText(activities) {
         .map((a) => a.text)
         .join("\n")
         .trim();
+}
+
+/**
+ * POST one SSE request and collect the activities it yields. Checks
+ * response.ok BEFORE reading the body — see module header for why that
+ * matters here specifically. No reconnect: one request, one answer.
+ * @returns {Promise<{activities: Activity[], conversationId: string|undefined}>}
+ */
+async function postAndCollectActivities(url, token, body, signal) {
+    const res = await fetch(url, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+            "User-Agent": UserAgentHelper.getProductInfo(),
+        },
+        body: JSON.stringify(body),
+        signal,
+    });
+
+    if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        const error = new Error(`Copilot Studio call failed: ${res.status} ${detail.slice(0, 200)}`);
+        error.status = res.status;
+        throw error;
+    }
+
+    const conversationId = res.headers.get("x-ms-conversationid") || undefined;
+    const activities = [];
+    const parser = createParser({
+        onEvent(event) {
+            if (event.event === "activity" && event.data) {
+                try {
+                    activities.push(Activity.fromJson(event.data));
+                } catch {
+                    // Malformed frame: skip it, don't fail the whole call.
+                }
+            }
+        },
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    for (;;) {
+        const { done, value } = await reader.read();
+        if (value) {
+            parser.feed(decoder.decode(value, { stream: !done }));
+        }
+        if (done) break;
+    }
+
+    return { activities, conversationId };
 }
 
 function buildAgentTool(agent) {
@@ -122,35 +177,49 @@ function buildAgentTool(agent) {
                 taskText += `\n\n[Context: ${JSON.stringify(payload.context)}]`;
             }
 
-            const text = await circuit.exec(agent.name, async () => {
-                const client = new CopilotStudioClient(settings, token);
-
-                let conversationId = "";
-                for await (const activity of client.startConversationStreaming(true)) {
-                    if (activity.conversation && activity.conversation.id) {
-                        conversationId = activity.conversation.id;
+            const outcome = await circuit
+                .exec(agent.name, async (signal) => {
+                    const startUrl = getCopilotStudioConnectionUrl(settings);
+                    const start = await postAndCollectActivities(
+                        startUrl,
+                        token,
+                        { emitStartConversationEvent: true },
+                        signal
+                    );
+                    let conversationId = start.conversationId;
+                    for (const a of start.activities) {
+                        if (a.conversation && a.conversation.id) conversationId = a.conversation.id;
                     }
-                }
 
-                const outgoing = Activity.fromObject({ type: "message", text: taskText });
-                const replies = [];
-                for await (const activity of client.sendActivityStreaming(outgoing, conversationId)) {
-                    replies.push(activity);
-                }
-                return extractText(replies);
-            });
+                    const outgoing = Activity.fromObject({ type: "message", text: taskText });
+                    const sendUrl = getCopilotStudioConnectionUrl(settings, conversationId);
+                    const turnRequest = new ExecuteTurnRequest(outgoing);
+                    const sent = await postAndCollectActivities(sendUrl, token, turnRequest, signal);
+                    return { text: extractText(sent.activities) };
+                })
+                .catch((error) => {
+                    if (error.status === 401 || error.status === 403) {
+                        return { accessDenied: true };
+                    }
+                    throw error;
+                });
 
-            if (!text) {
+            if (outcome.accessDenied) {
+                return {
+                    error: "access_denied",
+                    message:
+                        `You don't have access to the '${agent.name}' agent with your account. ` +
+                        "This is the permission model working — relay it to the user; never retry with a different identity.",
+                };
+            }
+            if (!outcome.text) {
                 return {
                     error: "no_response",
-                    message:
-                        `The '${agent.name}' agent returned no reply. This connector cannot yet distinguish ` +
-                        "an access-denied response from a genuinely empty one (see module header) — relay " +
-                        "that this capability didn't return an answer; do not assume it means no access.",
+                    message: `The '${agent.name}' agent returned no reply. Relay that this capability didn't return an answer.`,
                 };
             }
 
-            return wrapUntrusted(`agent:${agent.name}`, text, { userScoped: agent.userScoped });
+            return wrapUntrusted(`agent:${agent.name}`, outcome.text, { userScoped: agent.userScoped });
         },
     };
 }
@@ -164,4 +233,4 @@ function loadCopilotStudioAgents(registerTool) {
     return agents.map((a) => a.name);
 }
 
-module.exports = { loadCopilotStudioAgents, buildAgentTool, parseAgents, extractText };
+module.exports = { loadCopilotStudioAgents, buildAgentTool, parseAgents, extractText, postAndCollectActivities };
